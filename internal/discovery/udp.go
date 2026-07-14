@@ -3,100 +3,150 @@ package discovery
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
+	"strings"
 	"time"
+
+	"golang.org/x/net/ipv4"
 )
 
-type PeerInfoForUdpServer struct {
-	PeerID  string
-	TCPAddr string
-}
-
 type UdpServer struct {
-	ListenAddr string
+	// ListenAddr string
 	TCPAddr    string
-	// peerInfo   PeerInfoForUdpServer
+	// map peer_id -> TCPAddr
+	PeerInfo map[string]string
+	// should be added later after creating the peer
+	PeerID string
+	// will be constant thorough the app
+	MulticastAddr string
 
-	Listener *net.UDPConn
+	// Listener *net.UDPConn
+
+	debugger int
 }
 
-func NewUdpServer(ListenAddr string, TCPAddr string) *UdpServer {
+func NewUdpServer(TCPAddr string, MulticastAddr string, debugger int) *UdpServer {
+	if len(MulticastAddr) == 0 {
+		MulticastAddr = "239.255.10.10:9999"
+	}
 	return &UdpServer{
-		ListenAddr: ListenAddr,
-		TCPAddr:    TCPAddr,
+		TCPAddr:       TCPAddr,
+		PeerInfo:      make(map[string]string),
+		MulticastAddr: MulticastAddr,
+		debugger:      debugger,
 	}
 }
 
 // start the udp server
 func (u *UdpServer) Start() error {
-	// resolve the UDP address to bind to
-	addr, err := net.ResolveUDPAddr("udp", u.ListenAddr)
-	if err != nil {
-		log.Fatalf("Failed to resolve UDP address: %v", err)
-		return err
-	}
 
-	// start listening for incoming UDP packets
-	u.Listener, err = net.ListenUDP("udp", addr)
-	if err != nil {
-		log.Fatalf("Failed to start UDP server: %v", err)
-		return err
-	}
+	// start an Reciver loop
+	go u.Receiver()
 
-	log.Printf("UDP Server listening on %s\n ", u.ListenAddr)
-
-	// start an accept loop
-	go u.startAcceptLoop()
+	// starting broadcast
+	go u.Broadcast()
 
 	return nil
 }
 
-func (u *UdpServer) startAcceptLoop() error {
-	buffer := make([]byte, 4096)
+func (u *UdpServer) Receiver() error {
+	buffer := make([]byte, 256)
 
+	addr, err := net.ResolveUDPAddr("udp4", u.MulticastAddr)
+	if err != nil {
+		panic(err)
+	}
+
+	iface, err := net.InterfaceByName("lo")
+	if err != nil {
+		panic(err)
+	}
+	conn, err := net.ListenMulticastUDP("udp4", iface, addr)
+	if err != nil {
+		panic(err)
+	}
+	defer conn.Close()
+
+	// reciever loop here
 	for {
-		n, addr, err := u.Listener.ReadFromUDP(buffer)
+		n, addr, err := conn.ReadFromUDP(buffer)
 		if err != nil {
-			log.Printf("UDP read error: %v", err)
+			slog.Info("[StartAcceptLoop]", "[error-msg]", err.Error())
 			continue
 		}
-		log.Printf(
-			"Received %d bytes from %s: %s",
-			n,
-			addr.String(),
-			string(buffer[:n]),
-		)
+		info := strings.Split(string(buffer[:n]),"|")
+
+		if _,ok :=u.PeerInfo[info[2]]; !ok{
+			log.Printf(
+				"Received %d bytes from %s: %s",
+				n,
+				addr.String(),
+				string(buffer[:n]),
+			)
+		}
+		
+		u.PeerInfo[info[2]] = info[1]
 	}
 }
 
 func (u *UdpServer) Broadcast() error {
-	data := fmt.Appendf(nil, "HELLO|localhost%s", u.TCPAddr)
-	go u.broadcastLoop(data)
+
+	data := fmt.Appendf(nil, "HELLO|localhost%s|%s", u.TCPAddr, u.PeerID)
+
+	addr, err := net.ResolveUDPAddr("udp4", u.MulticastAddr)
+	if err != nil {
+		panic(err)
+	}
+
+	// this will change depending on platform
+	iface, err := net.InterfaceByName("lo")
+	if err != nil {
+		panic(err)
+	}
+
+	localAddr := net.UDPAddr{
+		IP:   net.ParseIP("127.0.0.1"),
+		Port: 0,
+	}
+
+	conn, err := net.DialUDP("udp4", &localAddr, addr)
+	if err != nil {
+		panic(err)
+	}
+	defer conn.Close()
+
+	packetConnector := ipv4.NewPacketConn(conn)
+
+	if err := packetConnector.SetMulticastInterface(iface); err != nil {
+		panic(err)
+	}
+
+	if err := packetConnector.SetMulticastLoopback(true); err != nil {
+		panic(err)
+	}
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	slog.Info("[broadcastloop] Sender started...")
+
+	for range ticker.C {
+		_, err := conn.Write(data)
+		if err != nil {
+			slog.Error("[boardcastLoop]", "[loop]", err.Error())
+			continue
+		}
+		slog.Info(fmt.Sprintf("[broadcastloop][%d]", u.debugger))
+
+	}
 	return nil
 }
 
-func (u *UdpServer) broadcastLoop(data []byte) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-	// version 1
-	addr, err := net.ResolveUDPAddr("udp", u.ListenAddr)
-	if err != nil {
-		log.Println(err)
-	}
-	for range ticker.C {
-		_, err := u.Listener.WriteToUDP(data, addr)
-		if err != nil {
-			log.Println(err)
-			continue
-		}
-		log.Println("broadcasted:", string(data))
-	}
-}
-
 func (u *UdpServer) Stop() error {
-	if u.Listener != nil {
-		return u.Listener.Close()
-	}
+	// if u.Listener != nil {
+	// 	return u.Listener.Close()
+	// }
 
 	return nil
 }

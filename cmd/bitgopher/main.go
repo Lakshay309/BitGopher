@@ -5,6 +5,8 @@ import (
 	"net"
 	"time"
 
+	"github.com/Lakshay309/bitgopher/internal/discovery"
+	"github.com/Lakshay309/bitgopher/internal/peer"
 	"golang.org/x/net/ipv4"
 )
 
@@ -21,8 +23,8 @@ func receiver(a int) {
 		panic(err)
 	}
 	fmt.Println("Interface:", iface.Name)
-fmt.Println("Index:", iface.Index)
-fmt.Println("Flags:", iface.Flags)
+	fmt.Println("Index:", iface.Index)
+	fmt.Println("Flags:", iface.Flags)
 	conn, err := net.ListenMulticastUDP("udp4", iface, addr)
 	if err != nil {
 		panic(err)
@@ -55,9 +57,9 @@ func sender(a int) {
 		panic(err)
 	}
 	localAddr := &net.UDPAddr{
-    IP: net.ParseIP("127.0.0.1"),
-    Port: 0,
-}
+		IP: net.ParseIP("127.0.0.1"),
+		Port: 0,
+	}
 
 	conn, err := net.DialUDP("udp4", localAddr, addr)
 	if err != nil {
@@ -94,13 +96,17 @@ func sender(a int) {
 }
 
 func main() {
-	// go receiver(1)
-	// go receiver(2)
+	// tcp server starts first 
+	discoveryServer := discovery.NewUdpServer(":8081","",3)
 
-	time.Sleep(time.Second)
+	// creating the peer
+	Peer := peer.NewLocalPeer(":8081","")
 
-	go sender(1)
-	// go sender(5)
+	discoveryServer.PeerID = Peer.PeerID
+
+	go discoveryServer.Broadcast()
+
+	// go discoveryServer.Receiver()
 
 	select {}
 }
