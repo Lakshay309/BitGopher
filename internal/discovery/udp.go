@@ -76,6 +76,14 @@ func (u *UdpServer) Receiver() error {
 			continue
 		}
 		info := strings.Split(string(buffer[:n]),"|")
+		
+		if len(info) < 3{
+			continue
+		}
+		
+		if u.PeerID == info[2]{
+			continue
+		}
 
 		if _,ok :=u.PeerInfo[info[2]]; !ok{
 			log.Printf(

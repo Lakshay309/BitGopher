@@ -106,7 +106,7 @@ func main() {
 
 	go discoveryServer.Broadcast()
 
-	// go discoveryServer.Receiver()
+	go discoveryServer.Receiver()
 
 	select {}
 }
