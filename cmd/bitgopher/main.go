@@ -97,10 +97,10 @@ func sender(a int) {
 
 func main() {
 	// tcp server starts first 
-	discoveryServer := discovery.NewUdpServer(":8081","",3)
+	discoveryServer := discovery.NewUdpServer(":8084",0)
 
 	// creating the peer
-	Peer := peer.NewLocalPeer(":8081","")
+	Peer := peer.NewLocalPeer(":8084","")
 
 	discoveryServer.PeerID = Peer.PeerID
 
