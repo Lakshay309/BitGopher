@@ -7,10 +7,10 @@ import (
 
 func main() {
 	// tcp server starts first
-	discoveryServer := discovery.NewUdpServer(":8084", 1)
+	discoveryServer := discovery.NewUdpServer(":8085", 0)
 
 	// creating the peer
-	Peer := peer.NewLocalPeer(":8084", "")
+	Peer := peer.NewLocalPeer(":8085", "")
 
 	discoveryServer.PeerID = Peer.PeerID
 

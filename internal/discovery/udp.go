@@ -2,7 +2,6 @@ package discovery
 
 import (
 	"fmt"
-	"log"
 	"log/slog"
 	"net"
 	"strings"
@@ -44,7 +43,7 @@ func NewUdpServer(TCPAddr string, discoveryMode DiscoveryMode) *UdpServer {
 // start the udp server
 func (u *UdpServer) Start() error {
 
-	// start an Receiver loop
+	// start an Receiver ( different for windows and linux )
 	go u.Receiver()
 
 	// starting broadcast
@@ -53,82 +52,13 @@ func (u *UdpServer) Start() error {
 	return nil
 }
 
-func (u *UdpServer) Receiver() error {
-	buffer := make([]byte, 256)
-
-	groupAddr, err := net.ResolveUDPAddr("udp4", multicastAddr)
-	if err != nil {
-		return err
-	}
-
-	iface, err := u.getInterface()
-	if err != nil {
-		return err
-	}
-
-	pc, err := listenUDPReuse(":9999")
-	if err != nil {
-		return err
-	}
-	defer pc.Close()
-
-	packetConn := ipv4.NewPacketConn(pc)
-
-	if err := packetConn.JoinGroup(iface, groupAddr); err != nil {
-		return err
-	}
-
-	udpConn, ok := pc.(*net.UDPConn)
-	if !ok {
-		return fmt.Errorf("failed to convert PacketConn to UDPConn")
-	}
-
-	slog.Info(
-		"Receiver started",
-		"iface", iface.Name,
-		"group", multicastAddr,
-	)
-
-	for {
-		n, addr, err := udpConn.ReadFromUDP(buffer)
-		if err != nil {
-			slog.Error(
-				"ReadFromUDP failed",
-				"err", err,
-			)
-			continue
-		}
-
-		info := strings.Split(string(buffer[:n]), "|")
-
-		if len(info) < 3 {
-			continue
-		}
-
-		if u.PeerID == info[2] {
-			continue
-		}
-
-		if _, ok := u.PeerInfo[info[2]]; !ok {
-			log.Printf(
-				"Received %d bytes from %s: %s",
-				n,
-				addr.String(),
-				string(buffer[:n]),
-			)
-		}
-
-		u.PeerInfo[info[2]] = info[1]
-	}
-}
-
 func (u *UdpServer) Broadcast() error {
-	
+
 	addr, err := net.ResolveUDPAddr("udp4", multicastAddr)
 	if err != nil {
 		panic(err)
 	}
-	
+
 	// this will change depending on platform
 	iface, err := u.getInterface()
 	if err != nil {
@@ -140,12 +70,12 @@ func (u *UdpServer) Broadcast() error {
 		"name", iface.Name,
 		"flags", iface.Flags.String(),
 	)
-	
+
 	ip, err := getIPv4(iface)
 	if err != nil {
 		panic(err)
 	}
-	
+
 	localAddr := net.UDPAddr{
 		IP:   ip,
 		Port: 0,
@@ -158,7 +88,7 @@ func (u *UdpServer) Broadcast() error {
 		tcpAddr,
 		u.PeerID,
 	)
-	
+
 	conn, err := net.DialUDP("udp4", &localAddr, addr)
 
 	if err != nil {
@@ -173,7 +103,7 @@ func (u *UdpServer) Broadcast() error {
 		panic(err)
 	}
 
-	if err := packetConnector.SetMulticastLoopback(false); err != nil {
+	if err := packetConnector.SetMulticastLoopback(true); err != nil {
 		panic(err)
 	}
 
@@ -200,7 +130,7 @@ func (u *UdpServer) Stop() error {
 	return nil
 }
 
-//TODO: currently this is not the best way to get LAN as it return first suitable interface ( like a system can have a DOCKER or VMware running that can cause issue as it can choose one of those interface so change this before conpletion of the project) 
+// TODO: currently this is not the best way to get LAN as it return first suitable interface ( like a system can have a DOCKER or VMware running that can cause issue as it can choose one of those interface so change this before conpletion of the project)
 func (u *UdpServer) getInterface() (*net.Interface, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
