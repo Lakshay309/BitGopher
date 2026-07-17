@@ -56,28 +56,49 @@ func (u *UdpServer) Start() error {
 func (u *UdpServer) Receiver() error {
 	buffer := make([]byte, 256)
 
-	addr, err := net.ResolveUDPAddr("udp4", multicastAddr)
+	groupAddr, err := net.ResolveUDPAddr("udp4", multicastAddr)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	iface, err := u.getInterface()
 	if err != nil {
-		panic(err)
+		return err
 	}
-	conn, err := net.ListenMulticastUDP("udp4", iface, addr)
-	if err != nil {
-		panic(err)
-	}
-	defer conn.Close()
 
-	// receiver loop here
+	pc, err := listenUDPReuse(":9999")
+	if err != nil {
+		return err
+	}
+	defer pc.Close()
+
+	packetConn := ipv4.NewPacketConn(pc)
+
+	if err := packetConn.JoinGroup(iface, groupAddr); err != nil {
+		return err
+	}
+
+	udpConn, ok := pc.(*net.UDPConn)
+	if !ok {
+		return fmt.Errorf("failed to convert PacketConn to UDPConn")
+	}
+
+	slog.Info(
+		"Receiver started",
+		"iface", iface.Name,
+		"group", multicastAddr,
+	)
+
 	for {
-		n, addr, err := conn.ReadFromUDP(buffer)
+		n, addr, err := udpConn.ReadFromUDP(buffer)
 		if err != nil {
-			slog.Info("[StartAcceptLoop]", "[error-msg]", err.Error())
+			slog.Error(
+				"ReadFromUDP failed",
+				"err", err,
+			)
 			continue
 		}
+
 		info := strings.Split(string(buffer[:n]), "|")
 
 		if len(info) < 3 {
@@ -102,7 +123,6 @@ func (u *UdpServer) Receiver() error {
 }
 
 func (u *UdpServer) Broadcast() error {
-
 	
 	addr, err := net.ResolveUDPAddr("udp4", multicastAddr)
 	if err != nil {
@@ -114,11 +134,12 @@ func (u *UdpServer) Broadcast() error {
 	if err != nil {
 		panic(err)
 	}
+
 	slog.Info(
-    "Using interface",
-    "name", iface.Name,
-    "flags", iface.Flags.String(),
-)
+		"Using interface",
+		"name", iface.Name,
+		"flags", iface.Flags.String(),
+	)
 	
 	ip, err := getIPv4(iface)
 	if err != nil {
@@ -152,7 +173,7 @@ func (u *UdpServer) Broadcast() error {
 		panic(err)
 	}
 
-	if err := packetConnector.SetMulticastLoopback(true); err != nil {
+	if err := packetConnector.SetMulticastLoopback(false); err != nil {
 		panic(err)
 	}
 
