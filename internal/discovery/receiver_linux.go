@@ -3,10 +3,12 @@
 package discovery
 
 import (
-	"log"
 	"log/slog"
 	"net"
 	"strings"
+	"time"
+
+	"github.com/Lakshay309/bitgopher/internal/peer"
 )
 
 func (u *UdpServer) Receiver() error {
@@ -35,7 +37,7 @@ func (u *UdpServer) Receiver() error {
 	)
 
 	for {
-		n, addr, err := conn.ReadFromUDP(buffer)
+		n, _, err := conn.ReadFromUDP(buffer)
 		if err != nil {
 			slog.Error("ReadFromUDP failed", "err", err)
 			continue
@@ -50,15 +52,13 @@ func (u *UdpServer) Receiver() error {
 			continue
 		}
 
-		if _, ok := u.PeerInfo[info[2]]; !ok {
-			log.Printf(
-				"Received %d bytes from %s: %s",
-				n,
-				addr.String(),
-				string(buffer[:n]),
-			)
+		peerInfo := peer.PeerInfo{
+			ID:        info[2],
+			TCPAddr:   info[1],
+			LastSeen:  time.Now(),
+			Discovery: u.discoveryMode,
 		}
 
-		u.PeerInfo[info[2]] = info[1]
+		u.discoveryChan <- peerInfo
 	}
 }

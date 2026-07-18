@@ -1,18 +1,26 @@
 package main
 
 import (
+	"github.com/Lakshay309/bitgopher/internal/common"
 	"github.com/Lakshay309/bitgopher/internal/discovery"
 	"github.com/Lakshay309/bitgopher/internal/peer"
 )
 
+
+
+
 func main() {
 	// tcp server starts first
-	discoveryServer := discovery.NewUdpServer(":8085", 0)
+	var i common.DiscoveryMode = 0
+	port :=":8081"
 
-	// creating the peer
-	Peer := peer.NewLocalPeer(":8085", "")
+	peerManager := peer.NewPeerManager(i,10)
 
-	discoveryServer.PeerID = Peer.PeerID
+	go peerManager.Run()
+
+	discoveryServer := discovery.NewUdpServer(port, i,peerManager.DiscoveryChan)
+
+	discoveryServer.PeerID = peerManager.Self.ID
 
 	go discoveryServer.Broadcast()
 

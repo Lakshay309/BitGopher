@@ -7,36 +7,31 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Lakshay309/bitgopher/internal/common"
+	"github.com/Lakshay309/bitgopher/internal/peer"
 	"golang.org/x/net/ipv4"
 )
 
 // constants
 const multicastAddr = "239.255.10.10:9999"
 
-type DiscoveryMode int
 
-const (
-	Local DiscoveryMode = iota
-	LAN
-	// WAN will have its own struct with same inferface discovery
-)
 
 type UdpServer struct {
-	// ListenAddr string
 	TCPAddr string
-	// map peer_id -> TCPAddr
-	PeerInfo map[string]string
-	// should be added later after creating the peer
+
 	PeerID string
 
-	discoveryMode DiscoveryMode
+	discoveryMode common.DiscoveryMode
+
+	discoveryChan chan peer.PeerInfo
 }
 
-func NewUdpServer(TCPAddr string, discoveryMode DiscoveryMode) *UdpServer {
+func NewUdpServer(TCPAddr string, discoveryMode common.DiscoveryMode,discoveryChan chan peer.PeerInfo) *UdpServer {
 	return &UdpServer{
 		TCPAddr:       TCPAddr,
-		PeerInfo:      make(map[string]string),
 		discoveryMode: discoveryMode,
+		discoveryChan: discoveryChan,
 	}
 }
 
@@ -123,9 +118,7 @@ func (u *UdpServer) Broadcast() error {
 }
 
 func (u *UdpServer) Stop() error {
-	// if u.Listener != nil {
-	// 	return u.Listener.Close()
-	// }
+	//  we will broadcast that we are closing the tcp server if user actually stop the server then this fucntion must be called and this function will notify other peer that this peer is actually going to sleep
 
 	return nil
 }
@@ -137,7 +130,7 @@ func (u *UdpServer) getInterface() (*net.Interface, error) {
 		return nil, err
 	}
 	switch u.discoveryMode {
-	case Local:
+	case common.Local:
 		for _, iface := range interfaces {
 			if iface.Flags&net.FlagUp == 0 {
 				continue
@@ -146,7 +139,7 @@ func (u *UdpServer) getInterface() (*net.Interface, error) {
 				return &iface, nil
 			}
 		}
-	case LAN:
+	case common.LAN:
 		for _, iface := range interfaces {
 			if iface.Flags&net.FlagUp == 0 {
 				continue
