@@ -70,6 +70,7 @@ func (u *UdpServer) Receiver() error {
 	if !ok {
 		return fmt.Errorf("failed to convert PacketConn to UDPConn")
 	}
+	u.recvConn = udpConn
 
 	slog.Info(
 		"Receiver started",
@@ -80,7 +81,13 @@ func (u *UdpServer) Receiver() error {
 	for {
 		n, _, err := udpConn.ReadFromUDP(buffer)
 		if err != nil {
-			slog.Error("ReadFromUDP failed", "err", err)
+			select{
+			case <-u.exit:
+				slog.Info("exit receiver loop")
+				return nil
+			default:
+				slog.Error("ReadFromUDP failed", "err", err)
+			}
 			continue
 		}
 
@@ -92,14 +99,17 @@ func (u *UdpServer) Receiver() error {
 		if u.PeerID == info[2] {
 			continue
 		}
-
-		peerInfo := peer.PeerInfo{
-			ID:        info[2],
-			TCPAddr:   info[1],
-			LastSeen:  time.Now(),
-			Discovery: u.discoveryMode,
+		if info[0] == string(Hello) {
+			peerInfo := peer.PeerInfo{
+				ID:        info[2],
+				TCPAddr:   info[1],
+				LastSeen:  time.Now(),
+				Discovery: u.discoveryMode,
+			}
+			u.discoveryChan <- peerInfo
+		} else if info[0] == string(Bye) {
+			// uuid in the remover chan that
+			u.removerChan <- info[2]
 		}
-
-		u.discoveryChan <- peerInfo
 	}
 }

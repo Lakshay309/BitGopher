@@ -13,9 +13,18 @@ import (
 )
 
 // constants
-const multicastAddr = "239.255.10.10:9999"
-
-
+type PacketType string
+// TODO(v2): Replace the text-based discovery protocol with a binary protocol.
+// Current format:
+//   HELLO|<tcpAddr>|<peerID>
+//   BYE|<tcpAddr>|<peerID>
+//
+// Keep the higher-level discovery logic unchanged.
+const (
+	multicastAddr = "239.255.10.10:9999"
+    Hello  PacketType = "HELLO"
+    Bye   PacketType = "BYE"
+)
 
 type UdpServer struct {
 	TCPAddr string
@@ -25,13 +34,21 @@ type UdpServer struct {
 	discoveryMode common.DiscoveryMode
 
 	discoveryChan chan peer.PeerInfo
+
+	removerChan chan string
+
+	exit chan struct{}
+
+	recvConn *net.UDPConn
 }
 
-func NewUdpServer(TCPAddr string, discoveryMode common.DiscoveryMode,discoveryChan chan peer.PeerInfo) *UdpServer {
+func NewUdpServer(TCPAddr string, discoveryMode common.DiscoveryMode, discoveryChan chan peer.PeerInfo,removerChan chan string) *UdpServer {
 	return &UdpServer{
 		TCPAddr:       TCPAddr,
 		discoveryMode: discoveryMode,
 		discoveryChan: discoveryChan,
+		exit:          make(chan struct{}),
+		removerChan: removerChan,
 	}
 }
 
@@ -78,11 +95,6 @@ func (u *UdpServer) Broadcast() error {
 
 	tcpAddr := net.JoinHostPort(ip.String(), strings.TrimPrefix(u.TCPAddr, ":"))
 
-	data := fmt.Appendf(nil,
-		"HELLO|%s|%s",
-		tcpAddr,
-		u.PeerID,
-	)
 
 	conn, err := net.DialUDP("udp4", &localAddr, addr)
 
@@ -107,19 +119,40 @@ func (u *UdpServer) Broadcast() error {
 
 	slog.Info("[broadcastloop] Sender started...")
 
-	for range ticker.C {
-		_, err := conn.Write(data)
-		if err != nil {
-			slog.Error("[broadcastLoop]", "[loop]", err.Error())
-			continue
+	for {
+		select {
+		case <-ticker.C:
+			if err := u.sendPacket(tcpAddr,Hello, conn);err != nil {
+				slog.Error("[broadcastLoop]", "[loop]", err.Error())
+			}
+		case <-u.exit:
+			if err := u.sendPacket(tcpAddr,Bye, conn);err != nil {
+				slog.Error("[broadcastLoop]", "[loop]", err.Error())
+			}
+			return nil
 		}
 	}
-	return nil
+}
+
+func (u *UdpServer) sendPacket(tcpAddr string,message PacketType, conn *net.UDPConn) error {
+	data := fmt.Appendf(nil,
+		"%s|%s|%s",
+		message,
+		tcpAddr,
+		u.PeerID,
+	)
+	_, err := conn.Write(data)
+	return err
 }
 
 func (u *UdpServer) Stop() error {
 	//  we will broadcast that we are closing the tcp server if user actually stop the server then this fucntion must be called and this function will notify other peer that this peer is actually going to sleep
+	close(u.exit)
 
+	if u.recvConn != nil{
+		return u.recvConn.Close()
+	}
+	
 	return nil
 }
 

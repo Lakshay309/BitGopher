@@ -19,6 +19,7 @@ type PeerManager struct {
 	Self          PeerInfo
 	Peers         map[string]*PeerInfo
 	DiscoveryChan chan PeerInfo
+	RemoverChan   chan string
 }
 
 func NewPeerManager(mode common.DiscoveryMode, channelBuffer int) *PeerManager {
@@ -29,6 +30,7 @@ func NewPeerManager(mode common.DiscoveryMode, channelBuffer int) *PeerManager {
 		Self:          selfInfo,
 		Peers:         make(map[string]*PeerInfo),
 		DiscoveryChan: make(chan PeerInfo, channelBuffer),
+		RemoverChan:   make(chan string),
 	}
 }
 
@@ -57,7 +59,7 @@ func (pm *PeerManager) Run() {
 
 		case <-ticker.C:
 			for id, peer := range pm.Peers {
-				if peer.ID == pm.Self.ID{
+				if peer.ID == pm.Self.ID {
 					continue
 				}
 				if time.Since(peer.LastSeen) > peerTimeOut {
@@ -65,6 +67,12 @@ func (pm *PeerManager) Run() {
 					delete(pm.Peers, id)
 				}
 			}
+		case peer:=<-pm.RemoverChan:
+			if _, ok := pm.Peers[peer];!ok{
+				continue
+			}
+			log.Printf("removeing peer: %s",peer)
+			delete(pm.Peers,peer)
 		}
 	}
 }
