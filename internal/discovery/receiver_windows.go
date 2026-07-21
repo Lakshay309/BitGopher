@@ -91,7 +91,14 @@ func (u *UdpServer) Receiver() error {
 			continue
 		}
 
-		info := strings.Split(string(buffer[:n]), "|")
+		// decrypt the data first
+		PlainData,err := u.decryptData(buffer[:n])
+		if err!=nil{
+			// remove this as it can become annoying
+			slog.Error(err.Error())
+		}
+
+		info := strings.Split(string(PlainData), "|")
 		if len(info) < 3 {
 			continue
 		}

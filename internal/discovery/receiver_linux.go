@@ -7,7 +7,6 @@ import (
 	"net"
 	"strings"
 	"time"
-
 	"github.com/Lakshay309/bitgopher/internal/peer"
 )
 
@@ -49,8 +48,14 @@ func (u *UdpServer) Receiver() error {
 			}
 			continue
 		}
+		// decrypt the data first
+		PlainData,err := u.decryptData(buffer[:n])
+		if err!=nil{
+			// remove this as it can become annoying
+			slog.Error(err.Error())
+		}
 
-		info := strings.Split(string(buffer[:n]), "|")
+		info := strings.Split(string(PlainData), "|")
 		if len(info) < 3 {
 			continue
 		}
