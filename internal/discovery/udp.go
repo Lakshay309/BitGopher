@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -12,24 +13,22 @@ import (
 
 	"github.com/Lakshay309/bitgopher/internal/common"
 	"github.com/Lakshay309/bitgopher/internal/peer"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/net/ipv4"
 )
 
 // constants
-type PacketType string
+type PacketType byte
 
-// TODO(v2): Replace the text-based discovery protocol with a binary protocol.
-// Current format:
-//
-//	HELLO|<tcpAddr>|<peerID>
-//	BYE|<tcpAddr>|<peerID>
-//
-// Keep the higher-level discovery logic unchanged.
 const (
-	multicastAddr            = "239.255.10.10:9999"
-	Hello         PacketType = "HELLO"
-	Bye           PacketType = "BYE"
+	multicastAddr = "239.255.10.10:9999"
+	UUIDSize = 16
+)
+
+const (
+	Hello PacketType = iota + 1
+	Bye
 )
 
 var salt = []byte("BitGopher-v1")
@@ -37,36 +36,47 @@ var salt = []byte("BitGopher-v1")
 type UdpServer struct {
 	TCPAddr string
 
-	PeerID string
-
-	key [32]byte
+	PeerID uuid.UUID
 
 	discoveryMode common.DiscoveryMode
 
 	discoveryChan chan peer.PeerInfo
 
-	removerChan chan string
+	removerChan chan uuid.UUID
 
 	exit chan struct{}
 
 	recvConn *net.UDPConn
+
+	gcm cipher.AEAD
 }
 
-func NewUdpServer(TCPAddr string, discoveryMode common.DiscoveryMode, discoveryChan chan peer.PeerInfo, removerChan chan string, password string) *UdpServer {
+func NewUdpServer(TCPAddr string, discoveryMode common.DiscoveryMode, discoveryChan chan peer.PeerInfo, removerChan chan uuid.UUID, password string) (*UdpServer, error) {
+
+	key := DeriveKey(password)
+
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
 	return &UdpServer{
 		TCPAddr:       TCPAddr,
 		discoveryMode: discoveryMode,
 		discoveryChan: discoveryChan,
 		exit:          make(chan struct{}),
 		removerChan:   removerChan,
-		key:           DeriveKey(password),
-	}
+		gcm:           gcm,
+	}, nil
 }
 
 // start the udp server
 func (u *UdpServer) Start() error {
-	slog.Info("working????")
-	slog.Info("[Start]", "Key: ", u.key)
 
 	// start an Receiver ( different for windows and linux )
 	go u.Receiver()
@@ -147,16 +157,18 @@ func (u *UdpServer) Broadcast() error {
 }
 
 func (u *UdpServer) sendPacket(tcpAddr string, message PacketType, conn *net.UDPConn) error {
-	data := fmt.Appendf(nil,
-		"%s|%s|%s",
-		message,
-		tcpAddr,
-		u.PeerID,
-	)
+	data := make([]byte, 0,2+len(tcpAddr)+UUIDSize)
+
+	data = append(data, byte(message))
+	
+	data = append(data, byte(len(tcpAddr)))
+	data = append(data, tcpAddr...)
+
+	data = append(data, u.PeerID[:]...)
 
 	//  Encrypt the data before writing it on connection
-	packet, err :=u.encryptData(data)
-	if err!=nil{
+	packet, err := u.encryptData(data)
+	if err != nil {
 		return err
 	}
 
@@ -257,17 +269,15 @@ func DeriveKey(password string) [32]byte {
 }
 
 func (u *UdpServer) decryptData(buffer []byte) ([]byte, error) {
-	block, err := aes.NewCipher(u.key[:])
-	if err != nil {
-		return nil, err
+	if len(buffer) < u.gcm.NonceSize() {
+		return nil, errors.New("packet too short")
 	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	nonce := buffer[:gcm.NonceSize()]
-	cipherText := buffer[gcm.NonceSize():]
-	plainText, err := gcm.Open(
+
+	nonceSize := u.gcm.NonceSize()
+	nonce := buffer[:nonceSize]
+	cipherText := buffer[nonceSize:]
+
+	plainText, err := u.gcm.Open(
 		nil,
 		nonce,
 		cipherText,
@@ -280,26 +290,18 @@ func (u *UdpServer) decryptData(buffer []byte) ([]byte, error) {
 	return plainText, nil
 }
 
-func (u *UdpServer) encryptData(data []byte)([]byte,error){
-	block, err := aes.NewCipher(u.key[:])
-	if err != nil {
-		return nil,err
+func (u *UdpServer) encryptData(data []byte) ([]byte, error) {
+	nonce := make([]byte, u.gcm.NonceSize())
+
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
 	}
 
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil,err
-	}
+	packet := make([]byte, 0, len(nonce)+len(data)+u.gcm.Overhead())
 
-	nonce := make([]byte, gcm.NonceSize())
-	_, err = rand.Read(nonce)
-	if err != nil {
-		return nil,err
-	}
+	packet = append(packet, nonce...)
 
-	cipherText := gcm.Seal(nil, nonce, data, nil)
+	packet = u.gcm.Seal(packet, nonce, data, nil)
 
-	packet := append(nonce, cipherText...)
-
-	return packet,nil
+	return packet, nil
 }

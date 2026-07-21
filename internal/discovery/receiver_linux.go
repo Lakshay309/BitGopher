@@ -5,9 +5,10 @@ package discovery
 import (
 	"log/slog"
 	"net"
-	"strings"
 	"time"
+
 	"github.com/Lakshay309/bitgopher/internal/peer"
+	"github.com/google/uuid"
 )
 
 func (u *UdpServer) Receiver() error {
@@ -39,7 +40,7 @@ func (u *UdpServer) Receiver() error {
 	for {
 		n, _, err := conn.ReadFromUDP(buffer)
 		if err != nil {
-			select{
+			select {
 			case <-u.exit:
 				slog.Info("exit receiver loop")
 				return nil
@@ -49,31 +50,48 @@ func (u *UdpServer) Receiver() error {
 			continue
 		}
 		// decrypt the data first
-		PlainData,err := u.decryptData(buffer[:n])
-		if err!=nil{
+		PlainData, err := u.decryptData(buffer[:n])
+		if err != nil {
 			// remove this as it can become annoying
 			slog.Error(err.Error())
 		}
 
-		info := strings.Split(string(PlainData), "|")
-		if len(info) < 3 {
+		if len(PlainData) < 2 {
+			slog.Error("invalid packet")
 			continue
 		}
 
-		if u.PeerID == info[2] {
+		packetType := PacketType(PlainData[0])
+		addrLen := int(PlainData[1])
+
+		if len(PlainData) != 2+addrLen+UUIDSize {
+			slog.Error("invalid packet length")
 			continue
 		}
-		if info[0] == string(Hello) {
+	
+
+		tcpAddr := string(PlainData[2 : 2+addrLen])
+
+		var peerID uuid.UUID
+
+		copy(peerID[:], PlainData[2+addrLen:2+addrLen+UUIDSize])
+
+		if peerID == u.PeerID {
+			continue
+		}
+
+		switch packetType {
+		case Hello:
 			peerInfo := peer.PeerInfo{
-				ID:        info[2],
-				TCPAddr:   info[1],
+				ID:        peerID,
+				TCPAddr:   tcpAddr,
 				LastSeen:  time.Now(),
 				Discovery: u.discoveryMode,
 			}
 			u.discoveryChan <- peerInfo
-		} else if info[0] == string(Bye) {
+		case Bye:
 			// uuid in the remover chan that
-			u.removerChan <- info[2]
+			u.removerChan <- peerID
 		}
 
 	}

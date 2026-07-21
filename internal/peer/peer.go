@@ -9,7 +9,7 @@ import (
 )
 
 type PeerInfo struct {
-	ID        string
+	ID        uuid.UUID
 	TCPAddr   string
 	LastSeen  time.Time
 	Discovery common.DiscoveryMode
@@ -17,20 +17,20 @@ type PeerInfo struct {
 
 type PeerManager struct {
 	Self          PeerInfo
-	Peers         map[string]*PeerInfo
+	Peers         map[uuid.UUID]*PeerInfo
 	DiscoveryChan chan PeerInfo
-	RemoverChan   chan string
+	RemoverChan   chan uuid.UUID
 }
 
 func NewPeerManager(mode common.DiscoveryMode, channelBuffer int) *PeerManager {
-	id := uuid.New().String()
+	id := uuid.New()
 	selfInfo := PeerInfo{ID: id, Discovery: mode}
 
 	return &PeerManager{
 		Self:          selfInfo,
-		Peers:         make(map[string]*PeerInfo),
+		Peers:         make(map[uuid.UUID]*PeerInfo),
 		DiscoveryChan: make(chan PeerInfo, channelBuffer),
-		RemoverChan:   make(chan string),
+		RemoverChan:   make(chan uuid.UUID),
 	}
 }
 
