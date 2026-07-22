@@ -60,6 +60,17 @@ func (t *TCPTransport) Start() error {
 	return nil
 }
 
+func (t *TCPTransport) Connect(addr string) error {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return err
+	}
+
+	t.handleConn(conn)
+
+	return nil
+}
+
 func (t *TCPTransport) acceptLoop() {
 	for {
 		conn, err := t.listener.Accept()
@@ -72,9 +83,9 @@ func (t *TCPTransport) acceptLoop() {
 	}
 }
 
+// TODO: understand this better and have better functionality here
 func (t *TCPTransport) handleConn(conn net.Conn) {
 	defer func() {
-		// TODO: understand this better and have better functionality here
 		if r := recover(); r != nil {
 			slog.Error("[handleConn]", "panic", r)
 			conn.Close()
@@ -94,8 +105,12 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 	}
 	t.mu.Unlock()
 
-	slog.Info("[handleConn]", "connected", peerID)
-	
+	slog.Info(
+		"[handleConn]",
+		"peerID", peerID,
+		"remoteAddr", conn.RemoteAddr(),
+	)
+
 	// Later:
 	// t.readLoop(peerID)
 
@@ -193,4 +208,11 @@ func writePacket(conn net.Conn, packet Packet) error {
 
 	return nil
 
+}
+
+// development
+func (t *TCPTransport) ConnectionCount() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return len(t.connections)
 }
