@@ -1,9 +1,7 @@
 package transport
 
 import (
-	"encoding/binary"
 	"errors"
-	"io"
 	"log"
 	"log/slog"
 	"net"
@@ -42,7 +40,7 @@ type Packet struct {
 
 func NewTCPTransport(pm *peer.PeerManager) (*TCPTransport, error) {
 	log.Printf("TCP should listen on %s", pm.Self.TCPAddr)
-	
+
 	return &TCPTransport{
 		tcpAddr:     pm.Self.TCPAddr,
 		peerID:      pm.Self.ID,
@@ -51,12 +49,13 @@ func NewTCPTransport(pm *peer.PeerManager) (*TCPTransport, error) {
 }
 
 func (t *TCPTransport) Start() error {
+	// TODO: better will be getting a random port from the os and then sending that port to the udp server and peerManager  also start the tcp server first after that we can start the udp server also the peer manager is the first thing that will run
 	listener, err := net.Listen("tcp", t.tcpAddr)
 	if err != nil {
 		return err
 	}
 	log.Printf("TCP should listen on %s", t.tcpAddr)
-	
+
 	t.listener = listener
 
 	log.Printf("TCP listening on %s", listener.Addr())
@@ -65,6 +64,7 @@ func (t *TCPTransport) Start() error {
 
 	return nil
 }
+
 
 func (t *TCPTransport) Connect(addr string) error {
 	if addr == "" {
@@ -89,6 +89,7 @@ func (t *TCPTransport) Connect(addr string) error {
 
 	return nil
 }
+
 
 func (t *TCPTransport) acceptLoop() {
 	for {
@@ -133,9 +134,27 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 		"remoteAddr", conn.RemoteAddr(),
 	)
 
-	// Later:
-	// t.readLoop(peerID)
+	// after successfull handshake
+	go t.readLoop(conn, peerID)
 
+}
+
+func (t *TCPTransport) readLoop(conn net.Conn, _ uuid.UUID) {
+	for {
+		packet, err := readPacket(conn)
+		if err != nil {
+			slog.Error("[readLoop]", "err", err)
+			return
+		}
+		switch packet.Type {
+		case PingPacket:
+			t.handlePing(conn)
+		case PongPacket:
+			t.handlePong()
+		default:
+			slog.Warn("unknown packet type", "type", packet.Type)
+		}
+	}
 }
 
 func (t *TCPTransport) performHandshake(conn net.Conn) (uuid.UUID, error) {
@@ -168,91 +187,12 @@ func (t *TCPTransport) performHandshake(conn net.Conn) (uuid.UUID, error) {
 	return peerID, nil
 }
 
-func readPacket(conn net.Conn) (Packet, error) {
-	// read first 4 byte to get length fiels
-	lengthBuf := make([]byte, LengthFieldSize)
-	if _, err := io.ReadFull(conn, lengthBuf); err != nil {
-		return Packet{}, err
-	}
-	packetLength := binary.BigEndian.Uint32(lengthBuf)
 
-	// checking for invalid packet
-	if packetLength < TypeFieldSize {
-		return Packet{}, errors.New("invalid packet length")
-	}
-	if packetLength > MaxPacketSize {
-		return Packet{}, errors.New("packet too large")
-	}
 
-	// read the remaining bytes (Type+Payload)
-	packetBuf := make([]byte, packetLength)
-	if _, err := io.ReadFull(conn, packetBuf); err != nil {
-		return Packet{}, err
-	}
-	packet := Packet{
-		Type:    PacketType(packetBuf[0]),
-		Payload: packetBuf[1:],
-	}
+// send ping
 
-	return packet, nil
-}
-
-func writePacket(conn net.Conn, packet Packet) error {
-	// length doesnot include the 4-byte length field itself
-	packetLength := uint32(TypeFieldSize + len(packet.Payload))
-
-	finalPacket := make([]byte, 0, PacketHeaderSize+len(packet.Payload))
-
-	// encoding the length in 4 byte big Endian
-	lengthBuf := make([]byte, LengthFieldSize)
-	binary.BigEndian.PutUint32(lengthBuf, packetLength)
-
-	// building the packet
-	finalPacket = append(finalPacket, lengthBuf...)
-	finalPacket = append(finalPacket, byte(packet.Type))
-	finalPacket = append(finalPacket, packet.Payload...)
-
-	// Write everything.
-	n, err := conn.Write(finalPacket)
-	if err != nil {
-		slog.Error(
-			"[writePacket]",
-			"error", err,
-			"bytesWritten", n,
-		)
-		return err
-	}
-
-	slog.Info(
-		"[writePacket]",
-		"bytesWritten", n,
-	)
-
-	return nil
-
-}
-
-// development
-func (t *TCPTransport) ConnectionCount() int {
-	resp := make(chan peer.PeerResponse)
-
-	t.peerManager.PeerEventChan <- peer.PeerEvent{
-		Type:     peer.GetConnectionCountEvent,
-		Response: resp,
-	}
-	result := <-resp
-
-	return result.Count
-}
-
-func (t *TCPTransport) getPeers() []peer.PeerInfo {
-	resp := make(chan peer.PeerResponse)
-
-	t.peerManager.PeerEventChan <- peer.PeerEvent{
-		Type:     peer.GetPeersEvent,
-		Response: resp,
-	}
-
-	result := <-resp
-	return result.Peers
+func (t *TCPTransport) SendPing(conn net.Conn) error {
+	return writePacket(conn, Packet{
+		Type: PingPacket,
+	})
 }

@@ -58,6 +58,7 @@ func main() {
 	fmt.Println("TCP1 Connections:", tcp.ConnectionCount())
 	// fmt.Println("TCP2 Connections:", tcp2.ConnectionCount())
 	// discoveryServer.Stop()
+	// tcp.SendPing()
 
 	select {}
 }
