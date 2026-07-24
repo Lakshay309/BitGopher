@@ -14,6 +14,7 @@ type TCPTransport struct {
 	peerID   uuid.UUID
 	listener net.Listener
 	tcpAddr  string
+	WriteChan chan WriteCommand
 
 	peerManager *peer.PeerManager
 }
@@ -45,11 +46,13 @@ func NewTCPTransport(pm *peer.PeerManager) (*TCPTransport, error) {
 		tcpAddr:     pm.Self.TCPAddr,
 		peerID:      pm.Self.ID,
 		peerManager: pm,
+		// TODO: think do we need the buffer or not 
+		WriteChan: make(chan WriteCommand,200),
 	}, nil
 }
 
 func (t *TCPTransport) Start() error {
-	// TODO: better will be getting a random port from the os and then sending that port to the udp server and peerManager  also start the tcp server first after that we can start the udp server also the peer manager is the first thing that will run
+	// TODO: better will be getting a random port from the os and then sending that port to the udp server and peerManager  also start the tcp server first after that we can start the udp server also the peer manager is the first thing that will run ( in future not now)
 	listener, err := net.Listen("tcp", t.tcpAddr)
 	if err != nil {
 		return err
@@ -61,14 +64,19 @@ func (t *TCPTransport) Start() error {
 	log.Printf("TCP listening on %s", listener.Addr())
 
 	go t.acceptLoop()
+	
+	// something like this 
+	go t.writeLoop() 
+	// go t.connectionMaintenanceLoop() // later
 
 	return nil
 }
 
 
+
 func (t *TCPTransport) Connect(addr string) error {
 	if addr == "" {
-		peers := t.getPeers()
+		peers := t.GetPeers()
 		for _, p := range peers {
 			if p.ID != t.peerManager.Self.ID {
 				addr = p.TCPAddr
@@ -139,23 +147,6 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 
 }
 
-func (t *TCPTransport) readLoop(conn net.Conn, _ uuid.UUID) {
-	for {
-		packet, err := readPacket(conn)
-		if err != nil {
-			slog.Error("[readLoop]", "err", err)
-			return
-		}
-		switch packet.Type {
-		case PingPacket:
-			t.handlePing(conn)
-		case PongPacket:
-			t.handlePong()
-		default:
-			slog.Warn("unknown packet type", "type", packet.Type)
-		}
-	}
-}
 
 func (t *TCPTransport) performHandshake(conn net.Conn) (uuid.UUID, error) {
 	// send our handshake
@@ -186,8 +177,6 @@ func (t *TCPTransport) performHandshake(conn net.Conn) (uuid.UUID, error) {
 
 	return peerID, nil
 }
-
-
 
 // send ping
 

@@ -27,6 +27,7 @@ func main() {
 	}
 
 	discoveryServer.PeerID = peerManager.Self.ID
+
 	tcp, err := transport.NewTCPTransport(peerManager)
 	if err != nil {
 		fmt.Println(err)
@@ -42,23 +43,32 @@ func main() {
 
 	// so i can start 2 instance and they both able to communicate with each other
 
-	// so i can start 2 instance and they both able to communicate with each other
-
 	for tcp.ConnectionCount() == 0 {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	//  if "" then it will try to get peer from the peers map first peer from the map
 	if err := tcp.Connect(""); err != nil {
 		log.Println(err)
 	}
 
 	time.Sleep(5 * time.Second)
+	// get peers 
+	peers := tcp.GetPeers()
+	
+	// sending the ping command
+	for _,peer := range peers{
+		if peer.ID != peerManager.Self.ID{
+			tcp.WriteChan <-transport.WriteCommand{
+				Conn:peer.Conn,
+				Packet: transport.Packet{
+					Type:transport.PingPacket,
+				},
+			}
+		}
+	}
+
 
 	fmt.Println("TCP1 Connections:", tcp.ConnectionCount())
-	// fmt.Println("TCP2 Connections:", tcp2.ConnectionCount())
-	// discoveryServer.Stop()
-	// tcp.SendPing()
 
 	select {}
 }

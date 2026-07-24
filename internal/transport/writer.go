@@ -2,39 +2,23 @@ package transport
 
 import (
 	"encoding/binary"
-	"errors"
-	"io"
 	"log/slog"
 	"net"
 )
 
-func readPacket(conn net.Conn) (Packet, error) {
-	// read first 4 byte to get length fiels
-	lengthBuf := make([]byte, LengthFieldSize)
-	if _, err := io.ReadFull(conn, lengthBuf); err != nil {
-		return Packet{}, err
-	}
-	packetLength := binary.BigEndian.Uint32(lengthBuf)
+type WriteCommand struct {
+	Conn   net.Conn
+	Packet Packet
+}
 
-	// checking for invalid packet
-	if packetLength < TypeFieldSize {
-		return Packet{}, errors.New("invalid packet length")
+func (t *TCPTransport) writeLoop() {
+	for cmd := range t.WriteChan {
+		slog.Info("[writeLoop]", "packet", cmd.Packet.Type)
+		err := writePacket(cmd.Conn, cmd.Packet)
+        if err != nil {
+            slog.Error("[writeLoop]", "err", err)
+        }
 	}
-	if packetLength > MaxPacketSize {
-		return Packet{}, errors.New("packet too large")
-	}
-
-	// read the remaining bytes (Type+Payload)
-	packetBuf := make([]byte, packetLength)
-	if _, err := io.ReadFull(conn, packetBuf); err != nil {
-		return Packet{}, err
-	}
-	packet := Packet{
-		Type:    PacketType(packetBuf[0]),
-		Payload: packetBuf[1:],
-	}
-
-	return packet, nil
 }
 
 func writePacket(conn net.Conn, packet Packet) error {

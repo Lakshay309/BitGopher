@@ -5,11 +5,6 @@ import (
 	"net"
 )
 
-// const (
-// 	pong = "PONG"
-// 	ping = "PING"
-// )
-
 func (t *TCPTransport) handlePing(conn net.Conn) {
 	slog.Info("received Ping")
 	err := writePacket(conn, Packet{

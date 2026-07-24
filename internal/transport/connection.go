@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"log/slog"
 	"net"
 )
 
@@ -11,12 +10,11 @@ type Connection struct {
 	SendChan chan Packet
 }
 
-
-func (c *Connection) writeLoop() {
-    for packet := range c.SendChan {
-        if err := writePacket(c.Conn, packet); err != nil {
-            slog.Error("[writeLoop]","err",err)
-            return
-        }
-    }
-}
+// func (c *Connection) writeLoop() {
+//     for packet := range c.SendChan {
+//         if err := writePacket(c.Conn, packet); err != nil {
+//             slog.Error("[writeLoop]","err",err)
+//             return
+//         }
+//     }
+// }

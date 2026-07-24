@@ -15,7 +15,7 @@ func (t *TCPTransport) ConnectionCount() int {
 	return result.Count
 }
 
-func (t *TCPTransport) getPeers() []peer.PeerInfo {
+func (t *TCPTransport) GetPeers() []peer.PeerInfo {
 	resp := make(chan peer.PeerResponse)
 
 	t.peerManager.PeerEventChan <- peer.PeerEvent{
