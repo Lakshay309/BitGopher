@@ -4,19 +4,20 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"log"
 	"log/slog"
 	"net"
-	"sync"
 
+	"github.com/Lakshay309/bitgopher/internal/peer"
 	"github.com/google/uuid"
 )
 
 type TCPTransport struct {
-	peerID      uuid.UUID
-	listener    net.Listener
-	tcpAddr     string
-	connections map[uuid.UUID]*Connection
-	mu          *sync.RWMutex
+	peerID   uuid.UUID
+	listener net.Listener
+	tcpAddr  string
+
+	peerManager *peer.PeerManager
 }
 
 type PacketType byte
@@ -39,12 +40,13 @@ type Packet struct {
 	Payload []byte
 }
 
-func NewTCPTransport(tcpAddr string, id uuid.UUID) (*TCPTransport, error) {
+func NewTCPTransport(pm *peer.PeerManager) (*TCPTransport, error) {
+	log.Printf("TCP should listen on %s", pm.Self.TCPAddr)
+	
 	return &TCPTransport{
-		tcpAddr:     tcpAddr,
-		peerID:      id,
-		connections: map[uuid.UUID]*Connection{},
-		mu:          &sync.RWMutex{},
+		tcpAddr:     pm.Self.TCPAddr,
+		peerID:      pm.Self.ID,
+		peerManager: pm,
 	}, nil
 }
 
@@ -53,7 +55,11 @@ func (t *TCPTransport) Start() error {
 	if err != nil {
 		return err
 	}
+	log.Printf("TCP should listen on %s", t.tcpAddr)
+	
 	t.listener = listener
+
+	log.Printf("TCP listening on %s", listener.Addr())
 
 	go t.acceptLoop()
 
@@ -61,6 +67,19 @@ func (t *TCPTransport) Start() error {
 }
 
 func (t *TCPTransport) Connect(addr string) error {
+	if addr == "" {
+		peers := t.getPeers()
+		for _, p := range peers {
+			if p.ID != t.peerManager.Self.ID {
+				addr = p.TCPAddr
+				break
+			}
+		}
+
+		if addr == "" {
+			return errors.New("no remote peers found")
+		}
+	}
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return err
@@ -98,12 +117,15 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 		return
 	}
 
-	t.mu.Lock()
-	t.connections[peerID] = &Connection{
-		PeerID: peerID,
-		Conn:   conn,
+	t.peerManager.PeerEventChan <- peer.PeerEvent{
+		Type: peer.SetConnectionEvent,
+		Command: peer.PeerCommand{
+			Peer: peer.PeerInfo{
+				ID:   peerID,
+				Conn: conn,
+			},
+		},
 	}
-	t.mu.Unlock()
 
 	slog.Info(
 		"[handleConn]",
@@ -212,7 +234,25 @@ func writePacket(conn net.Conn, packet Packet) error {
 
 // development
 func (t *TCPTransport) ConnectionCount() int {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return len(t.connections)
+	resp := make(chan peer.PeerResponse)
+
+	t.peerManager.PeerEventChan <- peer.PeerEvent{
+		Type:     peer.GetConnectionCountEvent,
+		Response: resp,
+	}
+	result := <-resp
+
+	return result.Count
+}
+
+func (t *TCPTransport) getPeers() []peer.PeerInfo {
+	resp := make(chan peer.PeerResponse)
+
+	t.peerManager.PeerEventChan <- peer.PeerEvent{
+		Type:     peer.GetPeersEvent,
+		Response: resp,
+	}
+
+	result := <-resp
+	return result.Peers
 }

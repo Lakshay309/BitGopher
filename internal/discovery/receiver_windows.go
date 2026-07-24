@@ -130,10 +130,24 @@ func (u *UdpServer) Receiver() error {
 				LastSeen:  time.Now(),
 				Discovery: u.discoveryMode,
 			}
-			u.discoveryChan <- peerInfo
+			peerEvent := peer.PeerEvent{
+				Type: peer.DiscoveryEvent,
+				Command: peer.PeerCommand{
+					Peer:peerInfo,
+				},
+			}
+			u.eventChan <- peerEvent
 		case Bye:
 			// uuid in the remover chan that
-			u.removerChan <- peerID
+			peerEvent := peer.PeerEvent{
+				Type:peer.RemovePeerEvent,
+				Command: peer.PeerCommand{
+					Peer: peer.PeerInfo{
+						ID: peerID,
+					},
+				},
+			}
+			u.eventChan <- peerEvent
 		}
 	}
 }

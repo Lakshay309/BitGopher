@@ -3,8 +3,6 @@ package discovery
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -14,7 +12,6 @@ import (
 	"github.com/Lakshay309/bitgopher/internal/common"
 	"github.com/Lakshay309/bitgopher/internal/peer"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/argon2"
 	"golang.org/x/net/ipv4"
 )
 
@@ -23,7 +20,7 @@ type PacketType byte
 
 const (
 	multicastAddr = "239.255.10.10:9999"
-	UUIDSize = 16
+	UUIDSize      = 16
 )
 
 const (
@@ -40,9 +37,7 @@ type UdpServer struct {
 
 	discoveryMode common.DiscoveryMode
 
-	discoveryChan chan peer.PeerInfo
-
-	removerChan chan uuid.UUID
+	eventChan chan peer.PeerEvent
 
 	exit chan struct{}
 
@@ -51,7 +46,7 @@ type UdpServer struct {
 	gcm cipher.AEAD
 }
 
-func NewUdpServer(TCPAddr string, discoveryMode common.DiscoveryMode, discoveryChan chan peer.PeerInfo, removerChan chan uuid.UUID, password string) (*UdpServer, error) {
+func NewUdpServer(TCPAddr string, discoveryMode common.DiscoveryMode, eventChan chan peer.PeerEvent, password string) (*UdpServer, error) {
 
 	key := DeriveKey(password)
 
@@ -68,9 +63,8 @@ func NewUdpServer(TCPAddr string, discoveryMode common.DiscoveryMode, discoveryC
 	return &UdpServer{
 		TCPAddr:       TCPAddr,
 		discoveryMode: discoveryMode,
-		discoveryChan: discoveryChan,
+		eventChan:     eventChan,
 		exit:          make(chan struct{}),
-		removerChan:   removerChan,
 		gcm:           gcm,
 	}, nil
 }
@@ -157,10 +151,11 @@ func (u *UdpServer) Broadcast() error {
 }
 
 func (u *UdpServer) sendPacket(tcpAddr string, message PacketType, conn *net.UDPConn) error {
-	data := make([]byte, 0,2+len(tcpAddr)+UUIDSize)
+
+	data := make([]byte, 0, 2+len(tcpAddr)+UUIDSize)
 
 	data = append(data, byte(message))
-	
+
 	data = append(data, byte(len(tcpAddr)))
 	data = append(data, tcpAddr...)
 
@@ -252,56 +247,4 @@ func getIPv4(iface *net.Interface) (net.IP, error) {
 		}
 	}
 	return nil, fmt.Errorf("no ipv4 found")
-}
-
-func DeriveKey(password string) [32]byte {
-	key := argon2.IDKey(
-		[]byte(password),
-		salt,
-		1,
-		64*1024,
-		4,
-		32,
-	)
-	var out [32]byte
-	copy(out[:], key)
-	return out
-}
-
-func (u *UdpServer) decryptData(buffer []byte) ([]byte, error) {
-	if len(buffer) < u.gcm.NonceSize() {
-		return nil, errors.New("packet too short")
-	}
-
-	nonceSize := u.gcm.NonceSize()
-	nonce := buffer[:nonceSize]
-	cipherText := buffer[nonceSize:]
-
-	plainText, err := u.gcm.Open(
-		nil,
-		nonce,
-		cipherText,
-		nil,
-	)
-	if err != nil {
-		// authentication failed or wrong password/key
-		return nil, err
-	}
-	return plainText, nil
-}
-
-func (u *UdpServer) encryptData(data []byte) ([]byte, error) {
-	nonce := make([]byte, u.gcm.NonceSize())
-
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-
-	packet := make([]byte, 0, len(nonce)+len(data)+u.gcm.Overhead())
-
-	packet = append(packet, nonce...)
-
-	packet = u.gcm.Seal(packet, nonce, data, nil)
-
-	return packet, nil
 }
