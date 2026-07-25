@@ -4,10 +4,14 @@ import (
 	"encoding/binary"
 	"log/slog"
 	"net"
+
+	"github.com/Lakshay309/bitgopher/internal/peer"
+	"github.com/google/uuid"
 )
 
 type WriteCommand struct {
 	Conn   net.Conn
+	PeerID uuid.UUID
 	Packet Packet
 }
 
@@ -17,7 +21,16 @@ func (t *TCPTransport) writeLoop() {
 		err := writePacket(cmd.Conn, cmd.Packet)
         if err != nil {
             slog.Error("[writeLoop]", "err", err)
+			continue
         }
+		t.peerManager.PeerEventChan<-peer.PeerEvent{
+			Type: peer.SetLastActivity,
+			Command: peer.PeerCommand{
+				Peer: peer.PeerInfo{
+					ID: cmd.PeerID,
+				},
+			},
+		}
 	}
 }
 

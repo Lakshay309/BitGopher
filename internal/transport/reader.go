@@ -7,23 +7,39 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/Lakshay309/bitgopher/internal/peer"
 	"github.com/google/uuid"
 )
 
-func (t *TCPTransport) readLoop(conn net.Conn, _ uuid.UUID) {
+type ReadCommad struct{
+	Conn net.Conn
+	PeerId uuid.UUID
+	Packet Packet
+}
+
+func (t *TCPTransport) readLoop(conn net.Conn, remotePeerID uuid.UUID) {
 	for {
 		packet, err := readPacket(conn)
 		if err != nil {
 			slog.Error("[readLoop]", "err", err)
 			return
 		}
-		switch packet.Type {
-		case PingPacket:
-			t.handlePing(conn)
-		case PongPacket:
-			t.handlePong()
-		default:
-			slog.Warn("unknown packet type", "type", packet.Type)
+		// upadate in run function in peermanager
+		// used command as we are not asking for any thing from the peerManger we have to update thing in the peerManager map
+		t.peerManager.PeerEventChan<-peer.PeerEvent{
+			Type: peer.SetLastActivity,
+			Command: peer.PeerCommand{
+				Peer: peer.PeerInfo{
+					ID: remotePeerID,
+				},
+			},
+		}
+
+		// controller will read from the read chan 
+		t.ReadChan <- ReadCommad{
+			Conn: conn,
+			PeerId: remotePeerID,
+			Packet: packet,
 		}
 	}
 }

@@ -14,7 +14,10 @@ type TCPTransport struct {
 	peerID   uuid.UUID
 	listener net.Listener
 	tcpAddr  string
+	// controller will put the packet in the write chan
 	WriteChan chan WriteCommand
+	// controller will read from the read chan 
+	ReadChan chan ReadCommad
 
 	peerManager *peer.PeerManager
 }

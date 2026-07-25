@@ -11,10 +11,11 @@ import (
 )
 
 type PeerInfo struct {
-	ID        uuid.UUID
-	TCPAddr   string
-	LastSeen  time.Time
-	Discovery common.DiscoveryMode
+	ID           uuid.UUID
+	TCPAddr      string
+	LastSeen     time.Time
+	LastActivity time.Time
+	Discovery    common.DiscoveryMode
 
 	Connected bool
 	Conn      net.Conn
@@ -31,6 +32,7 @@ const (
 	GetPeersEvent
 	GetPeerEvent
 	GetConnectionCountEvent
+	SetLastActivity 
 )
 
 type PeerCommand struct {
@@ -170,6 +172,13 @@ func (pm *PeerManager) Run() {
 				event.Response <- PeerResponse{
 					Count: len(pm.Peers),
 				}
+			case SetLastActivity:
+				peer, ok := pm.Peers[event.Command.Peer.ID]
+				if !ok {
+					continue
+				}
+				peer.LastActivity = time.Now()
+
 			}
 
 		case <-ticker.C:
