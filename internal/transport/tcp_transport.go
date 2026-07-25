@@ -2,21 +2,21 @@ package transport
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"log/slog"
 	"net"
+	"time"
 
 	"github.com/Lakshay309/bitgopher/internal/peer"
 	"github.com/google/uuid"
 )
 
 type TCPTransport struct {
-	peerID   uuid.UUID
 	listener net.Listener
-	tcpAddr  string
 	// controller will put the packet in the write chan
 	WriteChan chan WriteCommand
-	// controller will read from the read chan 
+	// controller will read from the read chan
 	ReadChan chan ReadCommad
 
 	peerManager *peer.PeerManager
@@ -29,6 +29,8 @@ const (
 	LengthFieldSize  = 4
 	TypeFieldSize    = 1
 	PacketHeaderSize = LengthFieldSize + TypeFieldSize
+	WriteChanSize    = 64
+	ReadChanSize     = 64
 )
 
 const (
@@ -46,61 +48,59 @@ func NewTCPTransport(pm *peer.PeerManager) (*TCPTransport, error) {
 	log.Printf("TCP should listen on %s", pm.Self.TCPAddr)
 
 	return &TCPTransport{
-		tcpAddr:     pm.Self.TCPAddr,
-		peerID:      pm.Self.ID,
 		peerManager: pm,
-		// TODO: think do we need the buffer or not 
-		WriteChan: make(chan WriteCommand,200),
+		WriteChan:   make(chan WriteCommand, WriteChanSize),
+		ReadChan:    make(chan ReadCommad, ReadChanSize),
 	}, nil
 }
 
 func (t *TCPTransport) Start() error {
-	// TODO: better will be getting a random port from the os and then sending that port to the udp server and peerManager  also start the tcp server first after that we can start the udp server also the peer manager is the first thing that will run ( in future not now)
-	listener, err := net.Listen("tcp", t.tcpAddr)
+	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		return err
 	}
-	log.Printf("TCP should listen on %s", t.tcpAddr)
+	tcpAddr := listener.Addr().(*net.TCPAddr)
+	t.peerManager.SetTCPAddr(fmt.Sprintf(":%d", tcpAddr.Port))
+	
 
 	t.listener = listener
 
 	log.Printf("TCP listening on %s", listener.Addr())
+	log.Printf("working good: %s",t.peerManager.Self.TCPAddr)
 
 	go t.acceptLoop()
-	
-	// something like this 
-	go t.writeLoop() 
-	// go t.connectionMaintenanceLoop() // later
+
+	go t.writeLoop()
 
 	return nil
 }
-
-
 
 func (t *TCPTransport) Connect(addr string) error {
-	if addr == "" {
-		peers := t.GetPeers()
-		for _, p := range peers {
-			if p.ID != t.peerManager.Self.ID {
-				addr = p.TCPAddr
-				break
-			}
+	const (
+		maxAttempts = 3
+		retryDelay  = 500 * time.Millisecond
+	)
+
+	var err error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		var conn net.Conn
+		conn, err = net.Dial("tcp", addr)
+		if err == nil {
+			t.handleConn(conn)
+			return nil
 		}
 
-		if addr == "" {
-			return errors.New("no remote peers found")
+		if attempt < maxAttempts {
+			log.Printf("Connect attempt %d/%d to %s failed: %v. Retrying...",
+				attempt, maxAttempts, addr, err)
+			time.Sleep(retryDelay)
 		}
 	}
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return err
-	}
 
-	t.handleConn(conn)
-
-	return nil
+	return fmt.Errorf("failed to connect to %s after %d attempts: %w",
+		addr, maxAttempts, err)
 }
-
 
 func (t *TCPTransport) acceptLoop() {
 	for {
@@ -150,12 +150,11 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 
 }
 
-
 func (t *TCPTransport) performHandshake(conn net.Conn) (uuid.UUID, error) {
 	// send our handshake
 	err := writePacket(conn, Packet{
 		Type:    HandshakePacket,
-		Payload: t.peerID[:],
+		Payload: t.peerManager.Self.ID[:],
 	})
 	if err != nil {
 		return uuid.Nil, err
@@ -179,12 +178,4 @@ func (t *TCPTransport) performHandshake(conn net.Conn) (uuid.UUID, error) {
 	}
 
 	return peerID, nil
-}
-
-// send ping
-
-func (t *TCPTransport) SendPing(conn net.Conn) error {
-	return writePacket(conn, Packet{
-		Type: PingPacket,
-	})
 }

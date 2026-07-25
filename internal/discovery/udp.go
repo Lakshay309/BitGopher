@@ -11,7 +11,6 @@ import (
 
 	"github.com/Lakshay309/bitgopher/internal/common"
 	"github.com/Lakshay309/bitgopher/internal/peer"
-	"github.com/google/uuid"
 	"golang.org/x/net/ipv4"
 )
 
@@ -31,13 +30,7 @@ const (
 var salt = []byte("BitGopher-v1")
 
 type UdpServer struct {
-	TCPAddr string
-
-	PeerID uuid.UUID
-
-	discoveryMode common.DiscoveryMode
-
-	eventChan chan peer.PeerEvent
+	peerManager *peer.PeerManager
 
 	exit chan struct{}
 
@@ -46,7 +39,7 @@ type UdpServer struct {
 	gcm cipher.AEAD
 }
 
-func NewUdpServer(TCPAddr string, discoveryMode common.DiscoveryMode, eventChan chan peer.PeerEvent, password string) (*UdpServer, error) {
+func NewUdpServer(pm *peer.PeerManager, password string) (*UdpServer, error) {
 
 	key := DeriveKey(password)
 
@@ -61,11 +54,9 @@ func NewUdpServer(TCPAddr string, discoveryMode common.DiscoveryMode, eventChan 
 	}
 
 	return &UdpServer{
-		TCPAddr:       TCPAddr,
-		discoveryMode: discoveryMode,
-		eventChan:     eventChan,
-		exit:          make(chan struct{}),
-		gcm:           gcm,
+		peerManager: pm,
+		exit: make(chan struct{}),
+		gcm:  gcm,
 	}, nil
 }
 
@@ -110,7 +101,7 @@ func (u *UdpServer) Broadcast() error {
 		Port: 0,
 	}
 
-	tcpAddr := net.JoinHostPort(ip.String(), strings.TrimPrefix(u.TCPAddr, ":"))
+	tcpAddr := net.JoinHostPort(ip.String(), strings.TrimPrefix(u.peerManager.Self.TCPAddr, ":"))
 
 	conn, err := net.DialUDP("udp4", &localAddr, addr)
 
@@ -159,7 +150,7 @@ func (u *UdpServer) sendPacket(tcpAddr string, message PacketType, conn *net.UDP
 	data = append(data, byte(len(tcpAddr)))
 	data = append(data, tcpAddr...)
 
-	data = append(data, u.PeerID[:]...)
+	data = append(data, u.peerManager.Self.ID[:]...)
 
 	//  Encrypt the data before writing it on connection
 	packet, err := u.encryptData(data)
@@ -188,7 +179,7 @@ func (u *UdpServer) getInterface() (*net.Interface, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch u.discoveryMode {
+	switch u.peerManager.Self.Discovery {
 	case common.Local:
 		for _, iface := range interfaces {
 			if iface.Flags&net.FlagUp == 0 {

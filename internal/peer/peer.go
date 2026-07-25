@@ -32,7 +32,10 @@ const (
 	GetPeersEvent
 	GetPeerEvent
 	GetConnectionCountEvent
-	SetLastActivity 
+	SetLastActivity
+)
+const (
+	PeerEventChanSize = 128
 )
 
 type PeerCommand struct {
@@ -65,31 +68,28 @@ type PeerManager struct {
 	PeerEventChan chan PeerEvent
 }
 
-func NewPeerManager(mode common.DiscoveryMode, channelBuffer int, port string) *PeerManager {
+func NewPeerManager(mode common.DiscoveryMode) *PeerManager {
 	id := uuid.New()
 
 	selfInfo := PeerInfo{
 		ID:        id,
-		TCPAddr:   port,
 		Discovery: mode,
 	}
 
 	return &PeerManager{
 		Self:          selfInfo,
 		Peers:         make(map[uuid.UUID]*PeerInfo),
-		PeerEventChan: make(chan PeerEvent, channelBuffer),
+		PeerEventChan: make(chan PeerEvent, PeerEventChanSize),
 	}
 }
 
-func (pm *PeerManager) SetSelfInfo(tcpAddr string) {
-	pm.Self.TCPAddr = tcpAddr
-}
-
 func (pm *PeerManager) Run() {
-	ticker := time.NewTicker(30 * time.Second)
+	
+	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
 
 	peerTimeOut := 2 * time.Minute
+	peerConnectionTimeOut := 10 * time.Minute
 
 	for {
 		select {
@@ -195,8 +195,31 @@ func (pm *PeerManager) Run() {
 					}
 
 					delete(pm.Peers, id)
+					continue
+				}
+
+				if time.Since(peer.LastActivity) > peerConnectionTimeOut {
+					log.Printf("Peer connection Timeout: %s", peer.ID)
+
+					if peer.Conn != nil {
+						if err := peer.Conn.Close(); err != nil {
+							log.Printf("Peer Connection TimeoutError: (closing connection) %s ", err)
+						}
+						peer.Connected = false
+					}
 				}
 			}
 		}
 	}
+}
+
+
+// setter
+
+func (pm *PeerManager) SetTCPAddr(addr string) {
+    pm.Self.TCPAddr = addr
+}
+
+func (pm *PeerManager) SetSelfInfo(tcpAddr string) {
+	pm.Self.TCPAddr = tcpAddr
 }

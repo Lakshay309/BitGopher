@@ -76,7 +76,7 @@ func (u *UdpServer) Receiver() error {
 
 		copy(peerID[:], PlainData[2+addrLen:2+addrLen+UUIDSize])
 
-		if peerID == u.PeerID {
+		if peerID == u.peerManager.Self.ID {
 			continue
 		}
 
@@ -86,7 +86,7 @@ func (u *UdpServer) Receiver() error {
 				ID:        peerID,
 				TCPAddr:   tcpAddr,
 				LastSeen:  time.Now(),
-				Discovery: u.discoveryMode,
+				Discovery: u.peerManager.Self.Discovery,
 			}
 			peerEvent := peer.PeerEvent{
 				Type: peer.DiscoveryEvent,
@@ -94,7 +94,7 @@ func (u *UdpServer) Receiver() error {
 					Peer:peerInfo,
 				},
 			}
-			u.eventChan <- peerEvent
+			u.peerManager.PeerEventChan <- peerEvent
 		case Bye:
 			// uuid in the remover chan that
 			peerEvent := peer.PeerEvent{
@@ -105,7 +105,7 @@ func (u *UdpServer) Receiver() error {
 					},
 				},
 			}
-			u.eventChan <- peerEvent
+			u.peerManager.PeerEventChan <- peerEvent
 		}
 
 	}
