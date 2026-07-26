@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 )
 
-type ReadCommad struct{
-	Conn net.Conn
+type ReadCommad struct {
+	Conn   net.Conn
 	PeerId uuid.UUID
 	Packet Packet
 }
@@ -21,12 +21,21 @@ func (t *TCPTransport) readLoop(conn net.Conn, remotePeerID uuid.UUID) {
 	for {
 		packet, err := readPacket(conn)
 		if err != nil {
+			t.peerManager.PeerEventChan <- peer.PeerEvent{
+				Type: peer.RemoveConnectionEvent,
+				Command: peer.PeerCommand{
+					Peer: peer.PeerInfo{
+						ID: remotePeerID,
+						Conn: conn,
+					},
+				},
+			}
 			slog.Error("[readLoop]", "err", err)
 			return
 		}
 		// upadate in run function in peermanager
 		// used command as we are not asking for any thing from the peerManger we have to update thing in the peerManager map
-		t.peerManager.PeerEventChan<-peer.PeerEvent{
+		t.peerManager.PeerEventChan <- peer.PeerEvent{
 			Type: peer.SetLastActivity,
 			Command: peer.PeerCommand{
 				Peer: peer.PeerInfo{
@@ -35,9 +44,9 @@ func (t *TCPTransport) readLoop(conn net.Conn, remotePeerID uuid.UUID) {
 			},
 		}
 
-		// controller will read from the read chan 
+		// controller will read from the read chan
 		t.ReadChan <- ReadCommad{
-			Conn: conn,
+			Conn:   conn,
 			PeerId: remotePeerID,
 			Packet: packet,
 		}

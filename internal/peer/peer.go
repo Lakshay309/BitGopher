@@ -2,6 +2,7 @@ package peer
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"time"
@@ -128,16 +129,32 @@ func (pm *PeerManager) Run() {
 			case SetConnectionEvent:
 				peer, ok := pm.Peers[event.Command.Peer.ID]
 				if !ok {
+					event.Response<-PeerResponse{
+						Err: fmt.Errorf("peer not found"),
+					}
+					continue
+				}
+				if peer.Conn!=nil {
+					event.Response<-PeerResponse{
+						Err: fmt.Errorf("duplicate connection"),
+					}
 					continue
 				}
 
 				peer.Conn = event.Command.Peer.Conn
 				peer.Connected = true
+				event.Response <- PeerResponse{}
 
 			case RemoveConnectionEvent:
 				peer, ok := pm.Peers[event.Command.Peer.ID]
 				if !ok {
 					continue
+				}
+				if event.Command.Peer.Conn!=nil && event.Command.Peer.Conn != peer.Conn{
+					continue
+				}
+				if peer.Conn!=nil{
+					peer.Conn.Close()
 				}
 
 				peer.Conn = nil
@@ -197,8 +214,8 @@ func (pm *PeerManager) Run() {
 					delete(pm.Peers, id)
 					continue
 				}
-
-				if time.Since(peer.LastActivity) > peerConnectionTimeOut {
+				
+				if time.Since(peer.LastActivity) > peerConnectionTimeOut && peer.Connected && peer.Conn!=nil {
 					log.Printf("Peer connection Timeout: %s", peer.ID)
 
 					if peer.Conn != nil {

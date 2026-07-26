@@ -75,7 +75,42 @@ func (t *TCPTransport) Start() error {
 	return nil
 }
 
+/* TODO: only one connection should be there even if both peer in the network dail at same time 
+This is why most P2P protocols use a deterministic tie-breaker.
+
+For example:
+
+if myID < peerID {
+    Keep outgoing.
+    Close incoming.
+} else {
+    Keep incoming.
+    Close outgoing.
+}
+Both peers compute the same rule.
+
+Example:
+
+A ID = 15
+B ID = 42
+
+A says:
+
+15 < 42
+
+I'll keep my outgoing connection.
+
+B says:
+
+42 > 15
+
+I'll keep my incoming connection.
+FIXME: so something like this ok
+FIXME: TODO: FIXME: TODO: most important
+*/
+
 func (t *TCPTransport) Connect(addr string) error {
+	// TODO: most important
 	const (
 		maxAttempts = 3
 		retryDelay  = 500 * time.Millisecond
@@ -115,6 +150,7 @@ func (t *TCPTransport) acceptLoop() {
 }
 
 // TODO: understand this better and have better functionality here
+
 func (t *TCPTransport) handleConn(conn net.Conn) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -128,7 +164,7 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 		conn.Close()
 		return
 	}
-
+	resp := make(chan peer.PeerResponse)
 	t.peerManager.PeerEventChan <- peer.PeerEvent{
 		Type: peer.SetConnectionEvent,
 		Command: peer.PeerCommand{
@@ -137,6 +173,12 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 				Conn: conn,
 			},
 		},
+		Response: resp,
+	}
+	result :=<-resp
+	if result.Err!=nil{
+		conn.Close()
+		return 
 	}
 
 	slog.Info(
@@ -149,6 +191,8 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 	go t.readLoop(conn, peerID)
 
 }
+// TODO: change the writepacket to writeloop instead
+
 
 func (t *TCPTransport) performHandshake(conn net.Conn) (uuid.UUID, error) {
 	// send our handshake

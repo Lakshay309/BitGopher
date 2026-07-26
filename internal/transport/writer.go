@@ -20,6 +20,15 @@ func (t *TCPTransport) writeLoop() {
 		slog.Info("[writeLoop]", "packet", cmd.Packet.Type)
 		err := writePacket(cmd.Conn, cmd.Packet)
         if err != nil {
+			t.peerManager.PeerEventChan<-peer.PeerEvent{
+				Type: peer.RemoveConnectionEvent,
+				Command: peer.PeerCommand{
+					Peer: peer.PeerInfo{
+						ID: cmd.PeerID,
+						Conn:cmd.Conn,
+					},
+				},
+			}
             slog.Error("[writeLoop]", "err", err)
 			continue
         }
