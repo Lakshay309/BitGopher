@@ -30,11 +30,11 @@ type App struct {
 	peerManager *peer.PeerManager
 	discovery   *discovery.UdpServer
 	exit        chan struct{}
-	uiLogChan   chan UILog
-	uiChan      chan UICommand
+	UiLogChan   chan UILog
+	UiChan      chan UICommand
 }
 
-func NewApp(mode common.DiscoveryMode,password string) (*App, error) {
+func NewApp(mode common.DiscoveryMode, password string) (*App, error) {
 	peerManager := peer.NewPeerManager(mode)
 	transport, err := transport.NewTCPTransport(peerManager)
 	if err != nil {
@@ -49,29 +49,85 @@ func NewApp(mode common.DiscoveryMode,password string) (*App, error) {
 		discovery:   udpserver,
 		peerManager: peerManager,
 		exit:        make(chan struct{}),
-		uiLogChan:   make(chan UILog, UILogChanSize),
-		uiChan:      make(chan UICommand, UIChanSize),
+		UiLogChan:   make(chan UILog, UILogChanSize),
+		UiChan:      make(chan UICommand, UIChanSize),
 	}, nil
 }
+
 
 func (a *App) Start() error {
 	// start tcp server
 	if err := a.transport.Start(); err != nil {
-		slog.Error("[app start]", "err", err)
+		a.UiLogChan <- UILog{
+			Payload:   "Failed to start TCP transport.",
+			Error:     err,
+			Originate: "App.Start",
+		}
 		return err
 	}
 
-	// run loop peermanager
+	// run peer manager
 	go a.peerManager.Run()
-	// TODO also start the Run function of app
 
-	// now start discovery server
+	// run the coordination system
+	go a.Run()
+
+	// start discovery server
 	if err := a.discovery.Start(); err != nil {
-		slog.Error("[app start]", "err", err)
+		a.UiLogChan <- UILog{
+			Payload:   "Failed to start discovery server.",
+			Error:     err,
+			Originate: "App.Start",
+		}
 		return err
 	}
+
 	return nil
 }
+
+// Main function for the app reads the readchan in the transport and have business logic for readchan
+func (a *App) Run() {
+	for {
+		select {
+		case cmd, ok := <-a.transport.ReadChan:
+			if !ok {
+				return
+			}
+			a.handlePacket(cmd)
+
+		case cmd := <-a.UiChan:
+			a.handleEvent(cmd)
+
+		case <-a.exit:
+			return
+
+		}
+	}
+}
+
+func (a *App) handleEvent(cmd UICommand) {
+	switch cmd.Type {
+	case UIPing:
+		a.handleUIPingEvent(cmd)
+	case UIPeers:
+		a.handleUIPeersEvent()
+	case UIDisconnect:
+		a.handleUIDisconnect(cmd)
+	}
+}
+
+func (a *App) handlePacket(cmd transport.ReadCommad) {
+	switch cmd.Packet.Type {
+	case transport.PingPacket:
+		a.handlePing(cmd)
+	case transport.PongPacket:
+		a.handlePong(cmd)
+	default:
+		slog.Warn("unknown packet", "type", cmd.Packet.Type)
+	}
+}
+
+//* helper function
 
 func (a *App) GetPeers() []peer.PeerInfo {
 	resp := make(chan peer.PeerResponse)
@@ -129,7 +185,7 @@ func (a *App) DisconnectPeer(peerID uuid.UUID) {
 	}
 }
 
-func (a *App) SendPacketSync(conn net.Conn, peerID uuid.UUID, packetType transport.PacketType, wantResult bool) error {
+func (a *App) SendPacketSync(conn net.Conn, peerID uuid.UUID, packetType transport.PacketType, payload []byte, wantResult bool) error {
 	if peerID == uuid.Nil {
 		return errors.New("invalid peer ID")
 	}
@@ -158,7 +214,8 @@ func (a *App) SendPacketSync(conn net.Conn, peerID uuid.UUID, packetType transpo
 		Conn:   conn,
 		PeerID: peerID,
 		Packet: transport.Packet{
-			Type: packetType,
+			Type:    packetType,
+			Payload: payload,
 		},
 		Response: resp,
 	}
@@ -175,7 +232,7 @@ func (a *App) SendPacketSync(conn net.Conn, peerID uuid.UUID, packetType transpo
 	return nil
 }
 
-func (a *App) SendPacket(conn net.Conn, peerID uuid.UUID, packetType transport.PacketType) error {
+func (a *App) SendPacket(conn net.Conn, peerID uuid.UUID, packetType transport.PacketType, payload []byte) error {
 	if peerID == uuid.Nil {
 		return errors.New("invalid peer ID")
 	}
@@ -199,49 +256,25 @@ func (a *App) SendPacket(conn net.Conn, peerID uuid.UUID, packetType transport.P
 		Conn:   conn,
 		PeerID: peerID,
 		Packet: transport.Packet{
-			Type: packetType,
+			Type:    packetType,
+			Payload: payload,
 		},
 	}
 	return nil
 }
 
-// Main function for the app reads the readchan in the transport and have business logic for readchan
-func (a *App) Run() {
-	for {
-		select {
-		case cmd, ok := <-a.transport.ReadChan:
-			if !ok {
-				return
-			}
-			a.handlePacket(cmd)
-
-		case <-a.exit:
-			return
-
-		}
-	}
-}
-
-func (a *App) handlePacket(cmd transport.ReadCommad) {
-	switch cmd.Packet.Type {
-	case transport.PingPacket:
-		a.handlePing(cmd)
-	case transport.PongPacket:
-		a.handlePong(cmd)
-	default:
-		slog.Warn("unknown packet", "type", cmd.Packet.Type)
-	}
-}
+//* handle packet function from readchan
 
 func (a *App) handlePing(cmd transport.ReadCommad) {
-	if err := a.SendPacket(cmd.Conn, cmd.PeerId, transport.PongPacket); err != nil {
+	if err := a.SendPacket(cmd.Conn, cmd.PeerId, transport.PongPacket, nil); err != nil {
 		slog.Error("failed to send pong", "err", err)
 	}
 }
 
 func (a *App) handlePong(cmd transport.ReadCommad) {
-	a.uiLogChan <- UILog{
-		Payload: fmt.Sprintf("PONG from %s", cmd.PeerId.String()),
-		Error:   nil,
+	a.UiLogChan <- UILog{
+		Payload:   fmt.Sprintf("PONG from %s", cmd.PeerId.String()),
+		Error:     nil,
+		Originate: "App.handlePong",
 	}
 }

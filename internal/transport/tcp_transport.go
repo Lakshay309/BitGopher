@@ -45,8 +45,6 @@ type Packet struct {
 }
 
 func NewTCPTransport(pm *peer.PeerManager) (*TCPTransport, error) {
-	log.Printf("TCP should listen on %s", pm.Self.TCPAddr)
-
 	return &TCPTransport{
 		peerManager: pm,
 		WriteChan:   make(chan WriteCommand, WriteChanSize),
@@ -63,9 +61,6 @@ func (t *TCPTransport) Start() error {
 	t.peerManager.SetTCPAddr(fmt.Sprintf(":%d", tcpAddr.Port))
 
 	t.listener = listener
-
-	log.Printf("TCP listening on %s", listener.Addr())
-	log.Printf("working good: %s", t.peerManager.Self.TCPAddr)
 
 	go t.acceptLoop()
 
@@ -114,7 +109,6 @@ func (t *TCPTransport) acceptLoop() {
 }
 
 // TODO: understand this better and have better functionality here
-
 func (t *TCPTransport) handleConn(conn net.Conn) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -156,8 +150,6 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 	go t.readLoop(conn, peerID)
 
 }
-
-
 
 func (t *TCPTransport) performHandshake(conn net.Conn) (uuid.UUID, error) {
 	// send our handshake
