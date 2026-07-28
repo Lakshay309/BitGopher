@@ -13,26 +13,35 @@ type WriteCommand struct {
 	Conn   net.Conn
 	PeerID uuid.UUID
 	Packet Packet
+	Response chan error
 }
 
 func (t *TCPTransport) writeLoop() {
 	for cmd := range t.WriteChan {
 		slog.Info("[writeLoop]", "packet", cmd.Packet.Type)
 		err := writePacket(cmd.Conn, cmd.Packet)
-        if err != nil {
-			t.peerManager.PeerEventChan<-peer.PeerEvent{
+		if err != nil && cmd.Packet.Type != HandshakePacket {
+			t.peerManager.PeerEventChan <- peer.PeerEvent{
 				Type: peer.RemoveConnectionEvent,
 				Command: peer.PeerCommand{
 					Peer: peer.PeerInfo{
-						ID: cmd.PeerID,
-						Conn:cmd.Conn,
+						ID:   cmd.PeerID,
+						Conn: cmd.Conn,
 					},
 				},
 			}
-            slog.Error("[writeLoop]", "err", err)
+			slog.Error("[writeLoop]", "err", err)
 			continue
-        }
-		t.peerManager.PeerEventChan<-peer.PeerEvent{
+		}
+		
+		if cmd.Response!=nil{
+			cmd.Response<-err
+		}
+
+		if cmd.Packet.Type == HandshakePacket {
+			continue
+		}
+		t.peerManager.PeerEventChan <- peer.PeerEvent{
 			Type: peer.SetLastActivity,
 			Command: peer.PeerCommand{
 				Peer: peer.PeerInfo{

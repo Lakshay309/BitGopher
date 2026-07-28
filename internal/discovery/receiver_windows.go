@@ -128,6 +128,7 @@ func (u *UdpServer) Receiver() error {
 				ID:        peerID,
 				TCPAddr:   tcpAddr,
 				LastSeen:  time.Now(),
+				// LastActivity: time.Now(),
 				Discovery: u.peerManager.Self.Discovery,
 			}
 			peerEvent := peer.PeerEvent{

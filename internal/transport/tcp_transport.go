@@ -61,12 +61,11 @@ func (t *TCPTransport) Start() error {
 	}
 	tcpAddr := listener.Addr().(*net.TCPAddr)
 	t.peerManager.SetTCPAddr(fmt.Sprintf(":%d", tcpAddr.Port))
-	
 
 	t.listener = listener
 
 	log.Printf("TCP listening on %s", listener.Addr())
-	log.Printf("working good: %s",t.peerManager.Self.TCPAddr)
+	log.Printf("working good: %s", t.peerManager.Self.TCPAddr)
 
 	go t.acceptLoop()
 
@@ -75,42 +74,7 @@ func (t *TCPTransport) Start() error {
 	return nil
 }
 
-/* TODO: only one connection should be there even if both peer in the network dail at same time 
-This is why most P2P protocols use a deterministic tie-breaker.
-
-For example:
-
-if myID < peerID {
-    Keep outgoing.
-    Close incoming.
-} else {
-    Keep incoming.
-    Close outgoing.
-}
-Both peers compute the same rule.
-
-Example:
-
-A ID = 15
-B ID = 42
-
-A says:
-
-15 < 42
-
-I'll keep my outgoing connection.
-
-B says:
-
-42 > 15
-
-I'll keep my incoming connection.
-FIXME: so something like this ok
-FIXME: TODO: FIXME: TODO: most important
-*/
-
 func (t *TCPTransport) Connect(addr string) error {
-	// TODO: most important
 	const (
 		maxAttempts = 3
 		retryDelay  = 500 * time.Millisecond
@@ -175,10 +139,11 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 		},
 		Response: resp,
 	}
-	result :=<-resp
-	if result.Err!=nil{
+	result := <-resp
+	if result.Err != nil {
+		slog.Error("[handleconn]","err",result.Err)
 		conn.Close()
-		return 
+		return
 	}
 
 	slog.Info(
@@ -191,17 +156,29 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 	go t.readLoop(conn, peerID)
 
 }
-// TODO: change the writepacket to writeloop instead
+
 
 
 func (t *TCPTransport) performHandshake(conn net.Conn) (uuid.UUID, error) {
 	// send our handshake
-	err := writePacket(conn, Packet{
-		Type:    HandshakePacket,
-		Payload: t.peerManager.Self.ID[:],
-	})
-	if err != nil {
-		return uuid.Nil, err
+	resp := make(chan error, 1)
+	t.WriteChan <- WriteCommand{
+		Conn: conn,
+		Packet: Packet{
+			Type:    HandshakePacket,
+			Payload: t.peerManager.Self.ID[:],
+		},
+		Response: resp,
+	}
+
+	select {
+	case err := <-resp:
+		if err != nil {
+			return uuid.Nil, err
+		}
+
+	case <-time.After(10 * time.Second):
+		return uuid.Nil, errors.New("handshake write timed out")
 	}
 
 	// read there handshake

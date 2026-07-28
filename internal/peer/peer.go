@@ -108,6 +108,7 @@ func (pm *PeerManager) Run() {
 					existing.Discovery = peer.Discovery
 					continue
 				}
+				peer.LastActivity=time.Now()
 
 				log.Printf("New peer discovered: %s (%s)", peer.ID, peer.TCPAddr)
 				pm.Peers[peer.ID] = &peer
