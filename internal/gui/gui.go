@@ -118,6 +118,7 @@ func (g *GUI) run() {
 		g.handleCommand(line)
 	}
 }
+// TODO: when deleting the peer from the will again discovered so we have to create somekind of blacklist to solve that problem as well ok 
 
 func (g *GUI) handleCommand(cmd string) {
 	fields := strings.Fields(cmd)
@@ -141,6 +142,7 @@ func (g *GUI) handleCommand(cmd string) {
 
 	case "disconnect":
 		// args should contain exactly one peer ID
+		g.handleDisconnect(args[0])
 
 	case "clear":
 		fmt.Print("\033[2J\033[3J\033[H")
@@ -179,6 +181,14 @@ func (g *GUI)handlePing(peerIdString string){
 	g.app.UiChan<-app.UICommand{
 		Type: app.UIPing,
 		RemotePeerID: peerId,
-
 	}
+}
+
+
+func (g *GUI) handleDisconnect(peerIdString string){
+	peerId ,err:=uuid.Parse(peerIdString)
+	if err!=nil{
+		slog.Error("[handlePing]","err",err)
+	}
+	g.app.DisconnectPeer(peerId)
 }

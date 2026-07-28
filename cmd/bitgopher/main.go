@@ -8,5 +8,5 @@ func main() {
 	gui := gui.NewGUI()
 	gui.Start()
 	
-	select {}
+	// select {}
 }
