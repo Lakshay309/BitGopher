@@ -72,11 +72,11 @@ func (u *UdpServer) Receiver() error {
 	}
 	u.recvConn = udpConn
 
-	slog.Info(
-		"Receiver started",
-		"iface", iface.Name,
-		"group", multicastAddr,
-	)
+	// slog.Info(
+	// 	"Receiver started",
+	// 	"iface", iface.Name,
+	// 	"group", multicastAddr,
+	// )
 
 	for {
 		n, _, err := udpConn.ReadFromUDP(buffer)

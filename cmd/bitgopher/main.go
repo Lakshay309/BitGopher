@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	application, err := app.NewApp()
+	application, err := app.NewApp(1,"hu")
 	if err != nil {
 		slog.Error("[main]", "err", err)
 	}

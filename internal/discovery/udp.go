@@ -85,11 +85,11 @@ func (u *UdpServer) Broadcast() error {
 		panic(err)
 	}
 
-	slog.Info(
-		"Using interface",
-		"name", iface.Name,
-		"flags", iface.Flags.String(),
-	)
+	// slog.Info(
+	// 	"Using interface",
+	// 	"name", iface.Name,
+	// 	"flags", iface.Flags.String(),
+	// )
 
 	ip, err := getIPv4(iface)
 	if err != nil {
@@ -124,7 +124,7 @@ func (u *UdpServer) Broadcast() error {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	slog.Info("[broadcastloop] Sender started...")
+	// slog.Info("[broadcastloop] Sender started...")
 
 	for {
 		select {
