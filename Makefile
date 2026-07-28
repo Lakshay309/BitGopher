@@ -11,11 +11,11 @@ else
 endif
 
 build:
-	@echo "Building BitGopher..."
+# 	@echo "Building BitGopher..."
 	@go build -o bin$(SEP)bitgopher$(BINARY_EXT) ./cmd/bitgopher
 
 run: build
-	@echo "Launching BitGopher..."
+# 	@echo "Launching BitGopher..."
 	@bin$(SEP)bitgopher$(BINARY_EXT) $(ARGS)
 
 clean:

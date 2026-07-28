@@ -3,24 +3,16 @@ package gui
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/Lakshay309/bitgopher/internal/app"
 	"github.com/Lakshay309/bitgopher/internal/common"
+	"github.com/google/uuid"
 )
 
-// ANSI Color Codes
-const (
-	Reset      = "\033[0m"
-	Bold       = "\033[1m"
-	Dim        = "\033[2m"
-	Cyan       = "\033[36m"
-	BrightCyan = "\033[96m"
-	Green      = "\033[32m"
-	Yellow     = "\033[33m"
-	Gray       = "\033[90m"
-)
+
 
 type GUI struct {
 	app *app.App
@@ -30,30 +22,22 @@ func NewGUI() *GUI {
 	return &GUI{}
 }
 
-func printBanner() {
-	// Crisp cyan gradient look for the banner
-	banner := `
-  ██████╗ ██╗████████╗██████╗  ██████╗  ██████╗ ██╗  ██╗███████╗██████╗ 
-  ██╔══██╗██║╚══██╔══╝██╔════╝ ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗
-  ██████╔╝██║   ██║   ██║  ███╗██║   ██║██████╔╝███████║█████╗  ██████╔╝
-  ██╔══██╗██║   ██║   ██║   ██║██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗
-  ██████╔╝██║   ██║   ╚██████╔╝╚██████╔╝██║     ██║  ██║███████╗██║  ██║
-  ╚═════╝ ╚═╝   ╚═╝    ╚═════╝  ╚═════╝  ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝`
-
-	fmt.Println(BrightCyan + banner + Reset)
-}
-
 func (g *GUI) Start() error {
 	reader := bufio.NewReader(os.Stdin)
 
 	var mode common.DiscoveryMode
+	printBanner()
+
+	// Styled Section Header & Options List
+	fmt.Printf("\n  %s%sSelect Discovery Mode%s\n", Bold, BrightCyan, Reset)
+	fmt.Printf("  %s%s%s\n", Gray, strings.Repeat("─", 30), Reset)
+	fmt.Printf("  %s[%s1%s]%s %-8s %s(Local peer discovery only)%s\n", Gray, Green, Gray, Reset, "local", Dim, Reset)
+	fmt.Printf("  %s[%s2%s]%s %-8s %s(Discover peers on local network)%s\n", Gray, Green, Gray, Reset, "lan", Dim, Reset)
+	fmt.Printf("  %s[%s3%s]%s %-8s %s[Not implemented]%s\n", Gray, Yellow, Gray, Reset, "wan", Dim, Reset)
+	fmt.Println()
 
 	for {
-		fmt.Println("\nSelect Discovery Mode:")
-		fmt.Println("  local (1)")
-		fmt.Println("  lan   (2)")
-		fmt.Println("  wan   (3) [Not implemented]")
-		fmt.Print("> ")
+		fmt.Printf(" %sbitgopher%s %s(%sselect mode%s) ❯%s ", BrightCyan, Reset, Gray, Yellow, Reset, Green)
 
 		input, err := reader.ReadString('\n')
 		if err != nil {
@@ -72,16 +56,17 @@ func (g *GUI) Start() error {
 			goto password
 
 		case "3", "wan":
-			fmt.Println("WAN discovery is not implemented yet.")
+			fmt.Printf("  %s▲ WAN discovery is not implemented yet.%s\n\n", Yellow, Reset)
 			continue
 
 		default:
-			fmt.Println("Invalid discovery mode. Please enter 'local', 'lan', or 'wan'.")
+			fmt.Printf("  %s✖ Invalid mode. Enter '1', '2', 'local', or 'lan'.%s\n\n", Yellow, Reset)
 		}
 	}
 
 password:
-	fmt.Print("Password: ")
+	fmt.Println()
+	fmt.Printf(" %sbitgopher%s %s(%spassword%s) ❯%s ", BrightCyan, Reset, Gray, Yellow, Reset, Green)
 
 	password, err := reader.ReadString('\n')
 	if err != nil {
@@ -100,6 +85,7 @@ password:
 	if err := g.app.Start(); err != nil {
 		return err
 	}
+	fmt.Print("\033[2J\033[3J\033[H")
 
 	g.run()
 	return nil
@@ -117,7 +103,6 @@ func (g *GUI) run() {
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
-		// Custom stylized prompt indicator
 		fmt.Printf(" %sbitgopher%s %s❯%s ", BrightCyan, Reset, Green, Reset)
 
 		line, err := reader.ReadString('\n')
@@ -130,28 +115,43 @@ func (g *GUI) run() {
 			continue
 		}
 
-		switch line {
-		case "help":
-			printHelp()
-			continue
-		case "clear":
-			// ANSI escape code to clear terminal screen and position cursor top-left
-			// \033[2J  - Clear whole screen
-			// \033[3J  - Clear scrollback buffer (prevents artifact ghosting)
-			// \033[H   - Move cursor to row 1, col 1 (top-left)
-			fmt.Print("\033[2J\033[3J\033[H")
-			continue
-		case "exit":
-			fmt.Println("\nExiting BitGopher... Goodbye!")
-			return
-		}
-
 		g.handleCommand(line)
 	}
 }
 
 func (g *GUI) handleCommand(cmd string) {
+	fields := strings.Fields(cmd)
+	if len(fields) == 0 {
+		return
+	}
+	command := strings.ToLower(fields[0])
+	args := fields[1:]
+	switch command {
+	case "help":
+		printHelp()
 
+	case "peers":
+		// peers takes no arguments
+		g.handlePeers()
+
+	case "ping":
+		// args should contain exactly one peer ID
+		g.handlePing(args[0])
+
+
+	case "disconnect":
+		// args should contain exactly one peer ID
+
+	case "clear":
+		fmt.Print("\033[2J\033[3J\033[H")
+
+	case "exit":
+		os.Exit(0)
+
+	default:
+		fmt.Printf("Unknown command: %s\n", command)
+		fmt.Println("Type 'help' to see available commands.")
+	}
 }
 
 func (g *GUI) logLoop() {
@@ -171,25 +171,14 @@ func (g *GUI) logLoop() {
 	}
 }
 
-func printHelp() {
-	fmt.Println()
-	fmt.Printf("  %s%sBitGopher Command Reference%s\n", Bold, BrightCyan, Reset)
-	fmt.Printf("  %s%s%s\n\n", Gray, strings.Repeat("─", 50), Reset)
-
-	commands := []struct {
-		cmd  string
-		desc string
-	}{
-		{"help", "Show this help menu"},
-		{"peers", "List all discovered network peers"},
-		{"ping <peer-id>", "Send a latency ping to a peer"},
-		{"disconnect <peer-id>", "Disconnect from a specific peer"},
-		{"clear", "Clear the terminal screen"},
-		{"exit", "Gracefully terminate BitGopher"},
+func (g *GUI)handlePing(peerIdString string){
+	peerId ,err:=uuid.Parse(peerIdString)
+	if err!=nil{
+		slog.Error("[handlePing]","err",err)
 	}
+	g.app.UiChan<-app.UICommand{
+		Type: app.UIPing,
+		RemotePeerID: peerId,
 
-	for _, c := range commands {
-		fmt.Printf("  %s%-22s%s %s%s%s\n", Green, c.cmd, Reset, Gray, c.desc, Reset)
 	}
-	fmt.Println()
 }

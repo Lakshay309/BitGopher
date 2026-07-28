@@ -2,7 +2,7 @@ package app
 
 import (
 	"fmt"
-	"strings"
+	"strconv"
 	"time"
 
 	"github.com/Lakshay309/bitgopher/internal/transport"
@@ -31,38 +31,57 @@ type UICommand struct {
 }
 
 // * handling UI function
-func (a *App) handleUIPeersEvent() {
+func (a *App) handleUIPeersEvent(response chan UIResponse) {
 	peers := a.GetPeers()
 
-	if len(peers) == 0 {
-		a.UiLogChan <- UILog{
-			Payload:   "No peers found.",
-			Originate: "App.handleUIPeersEvent",
-		}
-		return
-	}
+	rows := make([][]string, 0, len(peers)+1)
 
-	var builder strings.Builder
+	// Header
+	rows = append(rows, []string{
+		"#",
+		"ID",
+		"Connected",
+		"Last Seen",
+		"Last Activity",
+	})
 
-	fmt.Fprintf(&builder, "Found %d peer(s):\n\n", len(peers))
-
-	for _, peer := range peers {
-		fmt.Fprintf(&builder, "ID: %s\nConnected: %t\nLast Seen: %s\nLast Activity: %s\n\n",
-			peer.ID,
-			peer.Connected,
+	for i, peer := range peers {
+		rows = append(rows, []string{
+			strconv.Itoa(i + 1),
+			peer.ID.String(),
+			strconv.FormatBool(peer.Connected),
 			peer.LastSeen.Format(time.RFC3339),
-			peer.LastActivity.Format(time.RFC3339))
+			peer.LastActivity.Format(time.RFC3339),
+		})
 	}
 
-	a.UiLogChan <- UILog{
-		Payload:   builder.String(),
-		Originate: "App.handleUIPeersEvent",
+	response <- UIResponse{
+		Payload: rows,
 	}
 }
 
 func (a *App) handleUIPingEvent(cmd UICommand) {
 	peer := a.GetPeer(cmd.RemotePeerID)
 	if peer == nil {
+		a.UiLogChan <- UILog{
+			Payload:   fmt.Sprintf("Peer %s not found", cmd.RemotePeerID),
+			Originate: "App.handleUIPingEvent",
+		}
+		return
+	}
+
+	if peer.Conn == nil {
+		// first dail
+		err := a.transport.Connect(peer.TCPAddr)
+		if err != nil {
+			a.UiLogChan <- UILog{
+				Payload:   "handshake error",
+				Originate: "App.handleUIPingEvent",
+			}
+		}
+	}
+	peer = a.GetPeer(cmd.RemotePeerID)
+	if peer == nil || peer.Conn == nil {
 		a.UiLogChan <- UILog{
 			Payload:   fmt.Sprintf("Peer %s not found", cmd.RemotePeerID),
 			Originate: "App.handleUIPingEvent",

@@ -110,7 +110,7 @@ func (a *App) handleEvent(cmd UICommand) {
 	case UIPing:
 		a.handleUIPingEvent(cmd)
 	case UIPeers:
-		a.handleUIPeersEvent()
+		a.handleUIPeersEvent(cmd.Response)
 	case UIDisconnect:
 		a.handleUIDisconnect(cmd)
 	}
@@ -143,7 +143,7 @@ func (a *App) GetPeers() []peer.PeerInfo {
 func (a *App) GetPeer(ID uuid.UUID) *peer.PeerInfo {
 	resp := make(chan peer.PeerResponse)
 	a.peerManager.PeerEventChan <- peer.PeerEvent{
-		Type: peer.GetPeersEvent,
+		Type: peer.GetPeerEvent,
 		Query: peer.PeerQuery{
 			PeerID: ID,
 		},
