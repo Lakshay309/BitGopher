@@ -18,10 +18,11 @@ const (
 	ChunkExtensionType    = ".bgchunk"
 	ChunkDir              = "chunks"
 	MetaDataDir           = "metadata"
+	MetadataVersion       = 1
 )
 
 type ShareMetadata struct {
-	Version uint32
+	Version uint8
 
 	DisplayName string
 	Description string
@@ -73,18 +74,24 @@ type FileManager struct {
 	sharedDir string
 	PeerID    uuid.UUID
 
+	SeedChan chan SeedRequest
+
 	// hash -> file
 	filesByHash map[string]*FileInfo // key = hex(FileHash)
 	// noramalized search term ->files
 	searchIndex map[string][]*FileInfo
+	// is file currently seeded for local?
+	localSeededFiles map[string]struct{}
 }
 
 func NewFileManager(sharedDir string, peerID uuid.UUID) (*FileManager, error) {
 	fm := &FileManager{
-		sharedDir:   sharedDir,
-		PeerID:      peerID,
-		searchIndex: map[string][]*FileInfo{},
-		filesByHash: make(map[string]*FileInfo),
+		sharedDir:        sharedDir,
+		PeerID:           peerID,
+		localSeededFiles: map[string]struct{}{},
+		SeedChan:         make(chan SeedRequest),
+		searchIndex:      map[string][]*FileInfo{},
+		filesByHash:      make(map[string]*FileInfo),
 	}
 
 	if err := fm.initialize(); err != nil {
@@ -92,6 +99,18 @@ func NewFileManager(sharedDir string, peerID uuid.UUID) (*FileManager, error) {
 	}
 
 	return fm, nil
+}
+
+func (fm *FileManager) Run() {
+
+	for req := range fm.SeedChan {
+		switch req.Type {
+		case LocalSeed:
+			fm.localSeed(req)
+		case RemoteSeed:
+			fm.remoteSeed(req)
+		}
+	}
 }
 
 func (fm *FileManager) initialize() error {
@@ -172,7 +191,7 @@ func (fm *FileManager) loadMetaDataFile(file string) error {
 
 	// verify chunk metadata exists
 	chunkPath := filepath.Join(fm.sharedDir, ChunkDir, meta.ChunkFile)
-	
+
 	chunkInfo, err := os.Stat(chunkPath)
 	if err != nil {
 		return fmt.Errorf("chunk metadata not found: %w", err)
@@ -216,6 +235,8 @@ func (fm *FileManager) registerFile(file *FileInfo) {
 
 	fm.filesByHash[hash] = file
 
+	fm.localSeededFiles[file.Path] = struct{}{}
+
 	fm.addSearchTerm(file.DisplayName, file)
 	fm.addSearchTerm(file.Metadata.Filename, file)
 	for _, keyword := range file.Keywords {
@@ -231,14 +252,13 @@ func (fm *FileManager) addSearchTerm(term string, file *FileInfo) {
 	fm.searchIndex[term] = append(fm.searchIndex[term], file)
 }
 
-
-func normalize(s string) string {
-	s = strings.TrimSpace(strings.ToLower(s))
-	return strings.Join(strings.Fields(s), " ")
-}
-
 func (fm *FileManager) Search(query string) []*FileInfo
 
 func (fm *FileManager) Get(hash []byte) (*FileInfo, bool)
 
 func (fm *FileManager) ReadChunk(hash []byte, index uint32) ([]byte, error)
+
+func normalize(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	return strings.Join(strings.Fields(s), " ")
+}
