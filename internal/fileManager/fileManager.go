@@ -12,6 +12,10 @@ import (
 	"github.com/google/uuid"
 )
 
+type FileEventType byte
+
+const AddFileEvent FileEventType = 0
+
 const (
 	MaxMetadataSize       = 10 * 1024 * 1024 // 10 Mb
 	MetaDataExtensionType = ".bgmeta"
@@ -70,11 +74,18 @@ type FileInfo struct {
 	Path string
 }
 
+type FileEvent struct {
+	Type     FileEventType
+	Metadata ShareMetadata
+}
+
 type FileManager struct {
 	sharedDir string
 	PeerID    uuid.UUID
 
 	SeedChan chan SeedRequest
+
+	FileEventChan chan FileEvent
 
 	// hash -> file
 	filesByHash map[string]*FileInfo // key = hex(FileHash)
@@ -84,6 +95,8 @@ type FileManager struct {
 	localSeededFiles map[string]struct{}
 }
 
+
+// TODO: should only allocaate structure and nothing else
 func NewFileManager(sharedDir string, peerID uuid.UUID) (*FileManager, error) {
 	fm := &FileManager{
 		sharedDir:        sharedDir,
@@ -92,6 +105,7 @@ func NewFileManager(sharedDir string, peerID uuid.UUID) (*FileManager, error) {
 		SeedChan:         make(chan SeedRequest),
 		searchIndex:      map[string][]*FileInfo{},
 		filesByHash:      make(map[string]*FileInfo),
+		FileEventChan:    make(chan FileEvent),
 	}
 
 	if err := fm.initialize(); err != nil {
@@ -102,17 +116,35 @@ func NewFileManager(sharedDir string, peerID uuid.UUID) (*FileManager, error) {
 }
 
 func (fm *FileManager) Run() {
+	// TODO: instead of this we should have better syntax as the both seedChan and Event are independent of each other like they are not working on same data so we can have 2 function that can replace the common for loop 
+	for {
+		select {
+		case req := <-fm.SeedChan:
+			switch req.Type {
+			case LocalSeed:
+				//TODO: this throws error we will update in future add logger here!!
+				fm.localSeed(req)
+			case RemoteSeed:
+				// for future updates
+				fm.remoteSeed(req)
 
-	for req := range fm.SeedChan {
-		switch req.Type {
-		case LocalSeed:
-			fm.localSeed(req)
-		case RemoteSeed:
-			fm.remoteSeed(req)
+			}
+		case event := <-fm.FileEventChan:
+			switch event.Type {
+			case AddFileEvent:
+				fm.addToMap(event.Metadata)
+			}
 		}
 	}
+
 }
 
+// TODO: Temp here, will also have to complete this function 
+func (fm *FileManager) addToMap(metadata ShareMetadata) {
+
+}
+
+// TODO: this should be a Public function that will call the Run Function ok 
 func (fm *FileManager) initialize() error {
 	// 1. Ensure shared directory exists.
 	if err := os.MkdirAll(fm.sharedDir, 0755); err != nil {
