@@ -15,6 +15,7 @@ type SeedType uint8
 
 const (
 	LocalSeed SeedType = iota
+	RemoveSeed
 	RemoteSeed
 	ChunkSize = 1 << 20
 )
@@ -24,9 +25,10 @@ type SeedRequest struct {
 	Path        string
 	Description string
 	Keywords    []string
+	FileInfo    FileInfo
 
-	PeerID   uuid.UUID
-	Metadata *FileMetadata
+	PeerID uuid.UUID
+	// Metadata *FileMetadata
 }
 
 // TODO: we have to add the new file the we just created to the actuall filemanager object maps!!
@@ -96,7 +98,10 @@ func (fm *FileManager) localSeed(req SeedRequest) error {
 	if err := fm.writeMetadataFile(metadata); err != nil {
 		return err
 	}
-
+	fm.FileEventChan <- FileEvent{
+		Type:     AddFileEvent,
+		Metadata: metadata,
+	}
 	success = true
 	return nil
 }
@@ -153,7 +158,7 @@ func (fm *FileManager) writeMetadataFile(metadata ShareMetadata) error {
 	if err != nil {
 		return err
 	}
-	if err:=os.WriteFile(metaPath, data, 0644);err!=nil{
+	if err := os.WriteFile(metaPath, data, 0644); err != nil {
 		os.Remove(metaPath)
 	}
 	return nil

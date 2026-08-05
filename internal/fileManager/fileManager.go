@@ -2,86 +2,28 @@ package filemanager
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 )
 
-type FileEventType byte
-
-const AddFileEvent FileEventType = 0
+type StateType string
 
 const (
-	MaxMetadataSize       = 10 * 1024 * 1024 // 10 Mb
-	MetaDataExtensionType = ".bgmeta"
-	ChunkExtensionType    = ".bgchunk"
-	ChunkDir              = "chunks"
-	MetaDataDir           = "metadata"
-	MetadataVersion       = 1
+	StateInitializing StateType = "initializing"
+	StateReloading    StateType = "reloading"
+	StateReady        StateType = "ready"
+	StateUpdating     StateType = "update"
 )
-
-type ShareMetadata struct {
-	Version uint8
-
-	DisplayName string
-	Description string
-	Keywords    []string
-
-	Path string
-	// filename can be dereived from path ok
-
-	Size       int64
-	ModifiedAt int64
-
-	FileHash            []byte
-	ChunkFileSize       int64
-	ChunkFileModifiedAt int64
-	ChunkFileHash       []byte
-
-	// Path to the chunk metaData
-	ChunkFile string
-}
-
-// load only when a transfer starts.
-type ChunkMetadata struct {
-	ChunkSize   uint32
-	TotalChunks uint32
-	ChunkHashes [][]byte
-}
-
-type FileMetadata struct {
-	FileHash []byte
-	Size     int64
-
-	Filename string
-
-	ChunkFile     string
-	ChunkFileHash []byte
-}
-
-type FileInfo struct {
-	Metadata FileMetadata
-
-	DisplayName string
-	Keywords    []string
-	Description string
-
-	Path string
-}
-
-type FileEvent struct {
-	Type     FileEventType
-	Metadata ShareMetadata
-}
 
 type FileManager struct {
 	sharedDir string
 	PeerID    uuid.UUID
+
+	state atomic.Value
 
 	SeedChan chan SeedRequest
 
@@ -95,193 +37,39 @@ type FileManager struct {
 	localSeededFiles map[string]struct{}
 }
 
-
-// TODO: should only allocaate structure and nothing else
 func NewFileManager(sharedDir string, peerID uuid.UUID) (*FileManager, error) {
 	fm := &FileManager{
 		sharedDir:        sharedDir,
 		PeerID:           peerID,
 		localSeededFiles: map[string]struct{}{},
-		SeedChan:         make(chan SeedRequest),
 		searchIndex:      map[string][]*FileInfo{},
 		filesByHash:      make(map[string]*FileInfo),
-		FileEventChan:    make(chan FileEvent),
+		SeedChan:         make(chan SeedRequest, 100),
+		FileEventChan:    make(chan FileEvent, 100),
 	}
-
-	if err := fm.initialize(); err != nil {
-		return nil, err
-	}
-
+	fm.state.Store(StateInitializing)
 	return fm, nil
 }
 
 func (fm *FileManager) Run() {
-	// TODO: instead of this we should have better syntax as the both seedChan and Event are independent of each other like they are not working on same data so we can have 2 function that can replace the common for loop 
-	for {
-		select {
-		case req := <-fm.SeedChan:
-			switch req.Type {
-			case LocalSeed:
-				//TODO: this throws error we will update in future add logger here!!
-				fm.localSeed(req)
-			case RemoteSeed:
-				// for future updates
-				fm.remoteSeed(req)
-
-			}
-		case event := <-fm.FileEventChan:
-			switch event.Type {
-			case AddFileEvent:
-				fm.addToMap(event.Metadata)
-			}
-		}
-	}
-
+	go fm.seedLoop()
+	go fm.fileEventLoop()
 }
 
-// TODO: Temp here, will also have to complete this function 
-func (fm *FileManager) addToMap(metadata ShareMetadata) {
-
-}
-
-// TODO: this should be a Public function that will call the Run Function ok 
-func (fm *FileManager) initialize() error {
-	// 1. Ensure shared directory exists.
+func (fm *FileManager) Initialize() error {
 	if err := os.MkdirAll(fm.sharedDir, 0755); err != nil {
-		return fmt.Errorf("Failed to create shared directory: %w", err)
+		return fmt.Errorf("failed to create shared directory: %w", err)
 	}
-	// scan everyfile indide the shared directory
+
 	if err := fm.loadMetaData(); err != nil {
-		return fmt.Errorf("failed to scan shared Directory: %w", err)
-	}
-	return nil
-}
-
-func (fm *FileManager) loadMetaData() error {
-	entries, err := os.ReadDir(filepath.Join(fm.sharedDir, MetaDataDir))
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-
-		if entry.IsDir() || filepath.Ext(entry.Name()) != MetaDataExtensionType {
-			continue
-		}
-
-		if err := fm.loadMetaDataFile(filepath.Join(fm.sharedDir, MetaDataDir, entry.Name())); err != nil {
-			slog.Error(
-				"[FileManager-Scan]",
-				"MetaData",
-				entry.Name(),
-				"err", err,
-			)
-		}
-	}
-	return nil
-}
-
-func (fm *FileManager) loadMetaDataFile(file string) error {
-	// validate metadatfile itself
-	info, err := os.Stat(file)
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to scan shared directory: %w", err)
 	}
 
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("not a reqular file")
-	}
-	if info.Size() > MaxMetadataSize {
-		return fmt.Errorf("metadata file too large (%d byte)", info.Size())
-	}
+	fm.Run()
 
-	// read metadata
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return err
-	}
-
-	var meta ShareMetadata
-
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return fmt.Errorf("invalid metadata: %w", err)
-	}
-
-	//  verify original file exists
-	fileInfo, err := os.Stat(meta.Path)
-	if err != nil {
-		return fmt.Errorf("shared file not found: %w", err)
-	}
-
-	// Verify file hasn't changed
-	if fileInfo.Size() != meta.Size {
-		return fmt.Errorf("file size mismatch")
-	}
-
-	if fileInfo.ModTime().Unix() != meta.ModifiedAt {
-		return fmt.Errorf("file modified after metadata creation")
-	}
-
-	// verify chunk metadata exists
-	chunkPath := filepath.Join(fm.sharedDir, ChunkDir, meta.ChunkFile)
-
-	chunkInfo, err := os.Stat(chunkPath)
-	if err != nil {
-		return fmt.Errorf("chunk metadata not found: %w", err)
-	}
-
-	if !chunkInfo.Mode().IsRegular() {
-		return fmt.Errorf("chunk metadata is not a regular file")
-	}
-
-	if chunkInfo.Size() != meta.ChunkFileSize {
-		return fmt.Errorf("chunk metadata size mismatch")
-	}
-
-	if chunkInfo.ModTime().Unix() != meta.ChunkFileModifiedAt {
-		return fmt.Errorf("chunk metadata modified after creation")
-	}
-
-	fi := &FileInfo{
-		Metadata: FileMetadata{
-			FileHash:      meta.FileHash,
-			Size:          meta.Size,
-			Filename:      filepath.Base(meta.Path),
-			ChunkFile:     meta.ChunkFile,
-			ChunkFileHash: meta.ChunkFileHash,
-		},
-
-		DisplayName: meta.DisplayName,
-		Description: meta.Description,
-		Keywords:    meta.Keywords,
-
-		Path: meta.Path,
-	}
-
-	fm.registerFile(fi)
+	fm.setState(StateReady)
 
 	return nil
-}
-
-func (fm *FileManager) registerFile(file *FileInfo) {
-	hash := hex.EncodeToString(file.Metadata.FileHash)
-
-	fm.filesByHash[hash] = file
-
-	fm.localSeededFiles[file.Path] = struct{}{}
-
-	fm.addSearchTerm(file.DisplayName, file)
-	fm.addSearchTerm(file.Metadata.Filename, file)
-	for _, keyword := range file.Keywords {
-		fm.addSearchTerm(keyword, file)
-	}
-}
-
-func (fm *FileManager) addSearchTerm(term string, file *FileInfo) {
-	term = normalize(term)
-	if term == "" {
-		return
-	}
-	fm.searchIndex[term] = append(fm.searchIndex[term], file)
 }
 
 func (fm *FileManager) Search(query string) []*FileInfo
@@ -290,7 +78,188 @@ func (fm *FileManager) Get(hash []byte) (*FileInfo, bool)
 
 func (fm *FileManager) ReadChunk(hash []byte, index uint32) ([]byte, error)
 
-func normalize(s string) string {
-	s = strings.TrimSpace(strings.ToLower(s))
-	return strings.Join(strings.Fields(s), " ")
+func (fm *FileManager) seedLoop() {
+	for req := range fm.SeedChan {
+		switch req.Type {
+		case LocalSeed:
+			go fm.localSeed(req)
+		case RemoveSeed:
+			fm.removeSeed(req.FileInfo)
+		case RemoteSeed:
+			fm.remoteSeed(req)
+		}
+	}
+}
+
+func (fm *FileManager) fileEventLoop() {
+	for event := range fm.FileEventChan {
+		switch event.Type {
+		case AddFileEvent:
+			fm.addToMap(event.Metadata)
+		case RemoveFileEvent:
+			fm.removeFormMap(event.FileHash)
+		case GetFilesEvent:
+        event.Response <- fm.getFiles()
+    
+		}
+	}
+}
+
+func (fm *FileManager) setState(state StateType) {
+	fm.state.Store(state)
+}
+
+func (fm *FileManager) State() StateType {
+	return fm.state.Load().(StateType)
+}
+
+func (fm *FileManager) addToMap(metadata ShareMetadata) {
+	fm.setState(StateUpdating)
+	defer fm.setState(StateReady)
+
+	file := &FileInfo{
+		Metadata: FileMetadata{
+			FileHash:      metadata.FileHash,
+			Size:          metadata.Size,
+			Filename:      filepath.Base(metadata.Path),
+			ChunkFile:     metadata.ChunkFile,
+			ChunkFileHash: metadata.ChunkFileHash,
+		},
+		DisplayName: metadata.DisplayName,
+		Description: metadata.Description,
+		Keywords:    metadata.Keywords,
+		Path:        metadata.Path,
+	}
+
+	fm.registerFile(file)
+}
+
+
+
+func removeFileFromSlice(files []*FileInfo, target *FileInfo) []*FileInfo {
+	for i, file := range files {
+		if file == target {
+			files[i] = files[len(files)-1]
+			return files[:len(files)-1]
+		}
+	}
+	return files
+}
+
+func (fm *FileManager) removeSearchTerm(term string, file *FileInfo) {
+	term = normalize(term)
+	if term == "" {
+		return
+	}
+
+	// Remove the complete normalized term.
+	if files, ok := fm.searchIndex[term]; ok {
+		files = removeFileFromSlice(files, file)
+		if len(files) == 0 {
+			delete(fm.searchIndex, term)
+		} else {
+			fm.searchIndex[term] = files
+		}
+	}
+
+	// Remove tokenized terms.
+	tokens := tokenize(term)
+	for _, token := range tokens {
+		if token == term {
+			continue
+		}
+
+		files, ok := fm.searchIndex[token]
+		if !ok {
+			continue
+		}
+
+		files = removeFileFromSlice(files, file)
+		if len(files) == 0 {
+			delete(fm.searchIndex, token)
+		} else {
+			fm.searchIndex[token] = files
+		}
+	}
+}
+
+
+func (fm *FileManager) removeSeed(file FileInfo) {
+
+	// TODO: check this one more in the files ok!!!
+	metadataFilePath := filepath.Join(fm.sharedDir,MetaDataDir,file.DisplayName+MetaDataExtensionType)
+
+	chunkFilePath := filepath.Join(fm.sharedDir,ChunkDir,file.DisplayName+ChunkExtensionType)
+
+	if err := os.Remove(metadataFilePath); err != nil && !os.IsNotExist(err) {
+		return
+	}
+
+	if err := os.Remove(chunkFilePath); err != nil && !os.IsNotExist(err) {
+		return
+	}
+
+	fm.FileEventChan <- FileEvent{
+		Type: RemoveFileEvent,
+		FileHash: file.Metadata.FileHash,
+	}
+}
+
+func (fm *FileManager) removeFormMap(fileHash []byte) {
+	fm.setState(StateUpdating)
+	defer fm.setState(StateReady)
+
+	hash := hex.EncodeToString(fileHash)
+
+	file, ok := fm.filesByHash[hash]
+	if !ok {
+		return
+	}
+
+	// Remove from hash map.
+	delete(fm.filesByHash, hash)
+
+	// Remove from local seeded files.
+	delete(fm.localSeededFiles, file.Path)
+
+	// Remove from search index.
+	fm.removeSearchTerm(file.DisplayName, file)
+	fm.removeSearchTerm(file.Metadata.Filename, file)
+
+	for _, keyword := range file.Keywords {
+		fm.removeSearchTerm(keyword, file)
+	}
+}
+
+
+// func (fm *FileManager) getFiles() []FileInfo{
+// 	buffer := make([]FileInfo,0,len(fm.filesByHash))
+// 	for _,entry := range fm.filesByHash{
+// 		buffer = append(buffer, *entry)
+// 	}
+// 	return buffer
+// }
+
+func (fm *FileManager) getFiles() []FileInfo {
+	buffer := make([]FileInfo, 0, len(fm.filesByHash))
+
+	for _, entry := range fm.filesByHash {
+		file := FileInfo{
+			Metadata: FileMetadata{
+				FileHash:      append([]byte(nil), entry.Metadata.FileHash...),
+				Size:          entry.Metadata.Size,
+				Filename:      entry.Metadata.Filename,
+				ChunkFile:     entry.Metadata.ChunkFile,
+				ChunkFileHash: append([]byte(nil), entry.Metadata.ChunkFileHash...),
+			},
+			DisplayName: entry.DisplayName,
+			Description: entry.Description,
+			Keywords:    append([]string(nil), entry.Keywords...),
+			Path:        entry.Path,
+		}
+
+		buffer = append(buffer, file)
+	}
+
+	return buffer
 }
