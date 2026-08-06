@@ -53,6 +53,11 @@ func (fm *FileManager) localSeed(req SeedRequest) error {
 	if ok {
 		return fmt.Errorf("file already seeded: %s", path)
 	}
+	// check if same name file exist or not
+	_,err = os.Stat(filepath.Join(fm.sharedDir,MetaDataDir,filepath.Base(path)+MetaDataExtensionType))
+	if err == nil{
+		return fmt.Errorf("[localSeed] same name file already seeded!!")
+	}
 
 	// now we will generate the FileMetadata Info
 	metadata := ShareMetadata{
