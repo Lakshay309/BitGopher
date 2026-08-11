@@ -6,7 +6,22 @@ import (
 	"os"
 	"path/filepath"
 )
+/*
+populateChunkMetadata creates the chunk file for srcPath and populates
+the chunk-related fields of metadata.
 
+Required from metadata:
+	- srcPath
+    - DisplayName
+
+Updates:
+   - ChunkFile
+   - ChunkFileSize
+   - ChunkFileModifiedAt
+   - ChunkFileHash
+
+ Returns an error if the chunk file cannot be created, inspected, or hashed.
+*/
 func (fm *FileManager) populateChunkMetadata(srcPath string, metadata *ShareMetadata) error {
 	chunkFilePath := filepath.Join(
 		fm.sharedDir,
@@ -38,6 +53,17 @@ func (fm *FileManager) populateChunkMetadata(srcPath string, metadata *ShareMeta
 	return nil
 }
 
+
+/*
+createChunkFile reads srcPath in ChunkSize-sized blocks, computes a SHA-256
+hash for each block, and writes each hash sequentially to dstPath.
+
+Parameters:
+  - srcPath: path of the source file.
+  - dstPath: path where the chunk-hash file will be created.
+
+On failure, the partially created chunk file is removed.
+*/
 func (fm *FileManager) createChunkFile(srcPath string, dstPath string) error {
 	buffer := make([]byte, ChunkSize)
 	success := false

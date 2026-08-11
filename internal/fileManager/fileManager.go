@@ -97,6 +97,9 @@ func (fm *FileManager) seedLoop() {
 			fm.removeSeed(req.FileInfo)
 		case RemoteSeed:
 			fm.remoteSeed(req)
+		case ReSeed:
+			fm.removeSeed(req.FileInfo)
+			go fm.localSeed(req)
 		}
 	}
 }
@@ -173,26 +176,6 @@ func (fm *FileManager) removeSearchTerm(term string, file *FileInfo) {
 	}
 }
 
-func (fm *FileManager) removeSeed(file FileInfo) {
-
-	// TODO: check this one more in the files ok!!!
-	metadataFilePath := filepath.Join(fm.sharedDir, MetaDataDir, file.DisplayName+MetaDataExtensionType)
-
-	chunkFilePath := filepath.Join(fm.sharedDir, ChunkDir, file.DisplayName+ChunkExtensionType)
-
-	if err := os.Remove(metadataFilePath); err != nil && !os.IsNotExist(err) {
-		return
-	}
-
-	if err := os.Remove(chunkFilePath); err != nil && !os.IsNotExist(err) {
-		return
-	}
-
-	fm.FileEventChan <- FileEvent{
-		Type:     RemoveFileEvent,
-		FileHash: file.Metadata.FileHash,
-	}
-}
 
 func (fm *FileManager) removeFormMap(fileHash []byte) {
 	fm.setState(StateUpdating)

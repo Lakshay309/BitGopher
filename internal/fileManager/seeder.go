@@ -18,6 +18,7 @@ const (
 	LocalSeed SeedType = iota
 	RemoveSeed
 	RemoteSeed
+	ReSeed
 	ChunkSize = 1 << 20
 )
 
@@ -32,8 +33,26 @@ type SeedRequest struct {
 	// Metadata *FileMetadata
 }
 
-// TODO: we have to add the new file the we just created to the actuall filemanager object maps!!
-// req.Path
+/*
+localSeed creates a local seed from the file specified in the SeedRequest.
+
+Required from SeedRequest:
+  - Path
+  - Description
+  - Keywords
+
+Calls:
+  - populateFileHash
+  - populateChunkMetadata
+  - writeMetadataFile
+
+Side effects:
+  - Creates the chunk-hash file.
+  - Creates the metadata file.
+  - Sends an AddFileEvent through FileEventChan.
+
+On failure, removes any partially created files.
+*/
 func (fm *FileManager) localSeed(req SeedRequest) error {
 	fileInfo, err := os.Stat(req.Path)
 	if err != nil {
@@ -60,7 +79,6 @@ func (fm *FileManager) localSeed(req SeedRequest) error {
 		return fmt.Errorf("[localSeed] same name file already seeded!!")
 	}
 
-	// now we will generate the FileMetadata Info
 	metadata := ShareMetadata{
 		Version:     MetadataVersion,
 		DisplayName: filepath.Base(path),
@@ -98,7 +116,6 @@ func (fm *FileManager) localSeed(req SeedRequest) error {
 		return err
 	}
 	
-
 	if err := fm.populateChunkMetadata(req.Path, &metadata); err != nil {
 		return err
 	}
@@ -115,6 +132,14 @@ func (fm *FileManager) localSeed(req SeedRequest) error {
 	return nil
 }
 
+
+/*
+populateFileHash calculates the SHA-256 hash of the file at path and stores
+the resulting hash in metadata.FileHash.
+
+Required from metadata:
+  - FileHash is updated.
+*/
 func (fm *FileManager) populateFileHash(path string, metadata *ShareMetadata) error {
 	fileHash, err := fm.hashFile(path)
 	if err != nil {
@@ -126,6 +151,16 @@ func (fm *FileManager) populateFileHash(path string, metadata *ShareMetadata) er
 	return nil
 }
 
+/*
+writeMetadataFile serializes metadata as indented JSON and writes it to the
+metadata directory using metadata.DisplayName as the filename.
+
+Required from metadata:
+  - DisplayName
+
+Creates:
+  - <DisplayName>.bgmeta
+*/
 func (fm *FileManager) writeMetadataFile(metadata ShareMetadata) error {
 	metaPath := filepath.Join(
 		fm.sharedDir,
@@ -143,6 +178,12 @@ func (fm *FileManager) writeMetadataFile(metadata ShareMetadata) error {
 	return nil
 }
 
+/*
+hashFile calculates and returns the SHA-256 hash of the file at path.
+
+Returns:
+  - SHA-256 hash as a byte slice.
+*/
 func (fm *FileManager) hashFile(path string) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -158,6 +199,39 @@ func (fm *FileManager) hashFile(path string) ([]byte, error) {
 
 	return hasher.Sum(nil), nil
 }
+
+
+/* 
+removeSeed removes all locally generated files associated with a seed. 
+Required fields from 
+	FileInfo: 
+		- DisplayName  
+		- Metadata.FileHash 
+	Side effects: 
+		- Removes the metadata file. 
+		- Removes the chunk file. 
+		- Sends a RemoveFileEvent through FileEventChan. 
+*/
+func (fm *FileManager) removeSeed(file FileInfo) {
+
+	metadataFilePath := filepath.Join(fm.sharedDir, MetaDataDir, file.DisplayName+MetaDataExtensionType)
+
+	chunkFilePath := filepath.Join(fm.sharedDir, ChunkDir, file.DisplayName+ChunkExtensionType)
+
+	if err := os.Remove(metadataFilePath); err != nil && !os.IsNotExist(err) {
+		return
+	}
+
+	if err := os.Remove(chunkFilePath); err != nil && !os.IsNotExist(err) {
+		return
+	}
+
+	fm.FileEventChan <- FileEvent{
+		Type:     RemoveFileEvent,
+		FileHash: file.Metadata.FileHash,
+	}
+}
+
 
 func (fm *FileManager) remoteSeed(req SeedRequest) error {
 	return nil

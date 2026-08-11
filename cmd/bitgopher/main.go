@@ -27,15 +27,40 @@ func main() {
 		Keywords:    []string{"test"},
 		PeerID:      id,
 	}
-	// time.Sleep(30 * time.Second)
-	// resp := make(chan []filemanager.FileInfo)
-	// fm.FileEventChan<-filemanager.FileEvent{
-	// 	Type: filemanager.GetFilesEvent,
-	// 	Metadata: filemanager.ShareMetadata{
-	// 		DisplayName: "test",
-	// 	},
-	// 	Response: resp,
-	// }
+	time.Sleep(30 * time.Second)
+
+	resp := make(chan []filemanager.FileInfo)
+	fm.FileEventChan<-filemanager.FileEvent{
+		Type: filemanager.GetFilesEvent,
+		Metadata: filemanager.ShareMetadata{
+			DisplayName: "test",
+		},
+		Response: resp,
+	}
+	result := <-resp
+	fmt.Println("file manager file INfo")
+	fmt.Printf("%+v\n", result)
+	fm.SeedChan<-filemanager.SeedRequest{
+		Type: filemanager.RemoveSeed,
+		FileInfo: filemanager.FileInfo{
+			DisplayName: result[0].DisplayName,
+			Metadata: filemanager.FileMetadata{
+				FileHash: result[0].Metadata.FileHash,
+			},
+		},
+	}
+	time.Sleep(2*time.Second)
+	resp = make(chan []filemanager.FileInfo)
+	fm.FileEventChan<-filemanager.FileEvent{
+		Type: filemanager.GetFilesEvent,
+		Metadata: filemanager.ShareMetadata{
+			DisplayName: "test",
+		},
+		Response: resp,
+	}
+	result = <-resp
+	fmt.Println("file manager file INfo")
+	fmt.Printf("%+v\n", result)
 	for {
 		time.Sleep(time.Second)
 	}
