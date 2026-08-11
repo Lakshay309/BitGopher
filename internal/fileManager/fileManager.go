@@ -20,6 +20,7 @@ const (
 )
 
 type FileManager struct {
+	// this should be absolute path
 	sharedDir string
 	PeerID    uuid.UUID
 
@@ -57,7 +58,16 @@ func (fm *FileManager) Run() {
 }
 
 func (fm *FileManager) Initialize() error {
+	// creating main share folder
 	if err := os.MkdirAll(fm.sharedDir, 0755); err != nil {
+		return fmt.Errorf("failed to create shared directory: %w", err)
+	}
+	// creating the chunkDir
+	if err := os.MkdirAll(filepath.Join(fm.sharedDir, ChunkDir), 0755); err != nil {
+		return fmt.Errorf("failed to create shared directory: %w", err)
+	}
+	// creating the MetadataDir
+	if err := os.MkdirAll(filepath.Join(fm.sharedDir, MetaDataDir), 0755); err != nil {
 		return fmt.Errorf("failed to create shared directory: %w", err)
 	}
 
@@ -72,11 +82,11 @@ func (fm *FileManager) Initialize() error {
 	return nil
 }
 
-func (fm *FileManager) Search(query string) []*FileInfo
+// func (fm *FileManager) Search(query string) []*FileInfo
 
-func (fm *FileManager) Get(hash []byte) (*FileInfo, bool)
+// func (fm *FileManager) Get(hash []byte) (*FileInfo, bool)
 
-func (fm *FileManager) ReadChunk(hash []byte, index uint32) ([]byte, error)
+// func (fm *FileManager) ReadChunk(hash []byte, index uint32) ([]byte, error)
 
 func (fm *FileManager) seedLoop() {
 	for req := range fm.SeedChan {
@@ -99,18 +109,10 @@ func (fm *FileManager) fileEventLoop() {
 		case RemoveFileEvent:
 			fm.removeFormMap(event.FileHash)
 		case GetFilesEvent:
-        event.Response <- fm.getFiles()
-    
+			event.Response <- fm.getFiles()
+
 		}
 	}
-}
-
-func (fm *FileManager) setState(state StateType) {
-	fm.state.Store(state)
-}
-
-func (fm *FileManager) State() StateType {
-	return fm.state.Load().(StateType)
 }
 
 func (fm *FileManager) addToMap(metadata ShareMetadata) {
@@ -132,18 +134,6 @@ func (fm *FileManager) addToMap(metadata ShareMetadata) {
 	}
 
 	fm.registerFile(file)
-}
-
-
-
-func removeFileFromSlice(files []*FileInfo, target *FileInfo) []*FileInfo {
-	for i, file := range files {
-		if file == target {
-			files[i] = files[len(files)-1]
-			return files[:len(files)-1]
-		}
-	}
-	return files
 }
 
 func (fm *FileManager) removeSearchTerm(term string, file *FileInfo) {
@@ -183,13 +173,12 @@ func (fm *FileManager) removeSearchTerm(term string, file *FileInfo) {
 	}
 }
 
-
 func (fm *FileManager) removeSeed(file FileInfo) {
 
 	// TODO: check this one more in the files ok!!!
-	metadataFilePath := filepath.Join(fm.sharedDir,MetaDataDir,file.DisplayName+MetaDataExtensionType)
+	metadataFilePath := filepath.Join(fm.sharedDir, MetaDataDir, file.DisplayName+MetaDataExtensionType)
 
-	chunkFilePath := filepath.Join(fm.sharedDir,ChunkDir,file.DisplayName+ChunkExtensionType)
+	chunkFilePath := filepath.Join(fm.sharedDir, ChunkDir, file.DisplayName+ChunkExtensionType)
 
 	if err := os.Remove(metadataFilePath); err != nil && !os.IsNotExist(err) {
 		return
@@ -200,7 +189,7 @@ func (fm *FileManager) removeSeed(file FileInfo) {
 	}
 
 	fm.FileEventChan <- FileEvent{
-		Type: RemoveFileEvent,
+		Type:     RemoveFileEvent,
 		FileHash: file.Metadata.FileHash,
 	}
 }
@@ -231,15 +220,6 @@ func (fm *FileManager) removeFormMap(fileHash []byte) {
 	}
 }
 
-
-// func (fm *FileManager) getFiles() []FileInfo{
-// 	buffer := make([]FileInfo,0,len(fm.filesByHash))
-// 	for _,entry := range fm.filesByHash{
-// 		buffer = append(buffer, *entry)
-// 	}
-// 	return buffer
-// }
-
 func (fm *FileManager) getFiles() []FileInfo {
 	buffer := make([]FileInfo, 0, len(fm.filesByHash))
 
@@ -262,4 +242,12 @@ func (fm *FileManager) getFiles() []FileInfo {
 	}
 
 	return buffer
+}
+
+func (fm *FileManager) setState(state StateType) {
+	fm.state.Store(state)
+}
+
+func (fm *FileManager) State() StateType {
+	return fm.state.Load().(StateType)
 }

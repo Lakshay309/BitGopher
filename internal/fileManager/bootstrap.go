@@ -3,6 +3,7 @@ package filemanager
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,6 +13,9 @@ import (
 func (fm *FileManager) loadMetaData() error {
 	entries, err := os.ReadDir(filepath.Join(fm.sharedDir, MetaDataDir))
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		return err
 	}
 	for _, entry := range entries {

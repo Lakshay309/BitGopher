@@ -1,0 +1,89 @@
+package filemanager
+
+import (
+	"crypto/sha256"
+	"io"
+	"os"
+	"path/filepath"
+)
+
+func (fm *FileManager) populateChunkMetadata(srcPath string, metadata *ShareMetadata) error {
+	chunkFilePath := filepath.Join(
+		fm.sharedDir,
+		ChunkDir,
+		metadata.DisplayName+ChunkExtensionType,
+	)
+
+	if err := fm.createChunkFile(srcPath, chunkFilePath); err != nil {
+		return err
+	}
+
+	metadata.ChunkFile = metadata.DisplayName + ChunkExtensionType
+
+	chunkFileInfo, err := os.Stat(chunkFilePath)
+	if err != nil {
+		return err
+	}
+
+	metadata.ChunkFileSize = chunkFileInfo.Size()
+	metadata.ChunkFileModifiedAt = chunkFileInfo.ModTime().Unix()
+
+	chunkFileHash, err := fm.hashFile(chunkFilePath)
+	if err != nil {
+		return err
+	}
+
+	metadata.ChunkFileHash = chunkFileHash
+
+	return nil
+}
+
+func (fm *FileManager) createChunkFile(srcPath string, dstPath string) error {
+	buffer := make([]byte, ChunkSize)
+	success := false
+
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dstPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		dstFile.Close()
+		if !success {
+			os.Remove(dstPath)
+		}
+	}()
+
+	for {
+		n, err := srcFile.Read(buffer)
+
+		if n > 0 {
+			digest := sha256.Sum256(buffer[:n])
+
+			written, err := dstFile.Write(digest[:])
+			if err != nil {
+				return err
+			}
+
+			if written != len(digest) {
+				return io.ErrShortWrite
+			}
+		}
+
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return err
+		}
+	}
+
+	success = true
+	return nil
+}

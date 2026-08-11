@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -32,6 +33,7 @@ type SeedRequest struct {
 }
 
 // TODO: we have to add the new file the we just created to the actuall filemanager object maps!!
+// req.Path
 func (fm *FileManager) localSeed(req SeedRequest) error {
 	fileInfo, err := os.Stat(req.Path)
 	if err != nil {
@@ -42,7 +44,6 @@ func (fm *FileManager) localSeed(req SeedRequest) error {
 	if err != nil {
 		return err
 	}
-
 	// TODO: in version 2 we will be able to pass folders but not today
 	if fileInfo.IsDir() || !fileInfo.Mode().IsRegular() {
 		return fmt.Errorf("[localSeed]: we can only seed file at current stage!!")
@@ -54,8 +55,8 @@ func (fm *FileManager) localSeed(req SeedRequest) error {
 		return fmt.Errorf("file already seeded: %s", path)
 	}
 	// check if same name file exist or not
-	_,err = os.Stat(filepath.Join(fm.sharedDir,MetaDataDir,filepath.Base(path)+MetaDataExtensionType))
-	if err == nil{
+	_, err = os.Stat(filepath.Join(fm.sharedDir, MetaDataDir, filepath.Base(path)+MetaDataExtensionType))
+	if err == nil {
 		return fmt.Errorf("[localSeed] same name file already seeded!!")
 	}
 
@@ -87,6 +88,7 @@ func (fm *FileManager) localSeed(req SeedRequest) error {
 		if success {
 			return
 		}
+		slog.Error("[localSeed]","local seed stop here","ERROR")
 
 		_ = os.Remove(chunkFilePath)
 		_ = os.Remove(metaFilePath)
@@ -95,6 +97,7 @@ func (fm *FileManager) localSeed(req SeedRequest) error {
 	if err := fm.populateFileHash(path, &metadata); err != nil {
 		return err
 	}
+	
 
 	if err := fm.populateChunkMetadata(req.Path, &metadata); err != nil {
 		return err
@@ -103,6 +106,7 @@ func (fm *FileManager) localSeed(req SeedRequest) error {
 	if err := fm.writeMetadataFile(metadata); err != nil {
 		return err
 	}
+
 	fm.FileEventChan <- FileEvent{
 		Type:     AddFileEvent,
 		Metadata: metadata,
@@ -118,36 +122,6 @@ func (fm *FileManager) populateFileHash(path string, metadata *ShareMetadata) er
 	}
 
 	metadata.FileHash = fileHash
-	return nil
-}
-
-func (fm *FileManager) populateChunkMetadata(srcPath string, metadata *ShareMetadata) error {
-	chunkFilePath := filepath.Join(
-		fm.sharedDir,
-		ChunkDir,
-		metadata.DisplayName+ChunkExtensionType,
-	)
-
-	if err := fm.createChunkFile(srcPath, chunkFilePath); err != nil {
-		return err
-	}
-
-	metadata.ChunkFile = metadata.DisplayName + ChunkExtensionType
-
-	chunkFileInfo, err := os.Stat(chunkFilePath)
-	if err != nil {
-		return err
-	}
-
-	metadata.ChunkFileSize = chunkFileInfo.Size()
-	metadata.ChunkFileModifiedAt = chunkFileInfo.ModTime().Unix()
-
-	chunkFileHash, err := fm.hashFile(chunkFilePath)
-	if err != nil {
-		return err
-	}
-
-	metadata.ChunkFileHash = chunkFileHash
 
 	return nil
 }
@@ -166,58 +140,6 @@ func (fm *FileManager) writeMetadataFile(metadata ShareMetadata) error {
 	if err := os.WriteFile(metaPath, data, 0644); err != nil {
 		os.Remove(metaPath)
 	}
-	return nil
-}
-
-func (fm *FileManager) createChunkFile(srcPath string, dstPath string) error {
-	buffer := make([]byte, ChunkSize)
-
-	srcFile, err := os.Open(srcPath)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	dstFile, err := os.Create(dstPath)
-	if err != nil {
-		return err
-	}
-	success := false
-
-	defer func() {
-		dstFile.Close()
-
-		if !success {
-			os.Remove(dstPath)
-		}
-	}()
-
-	for {
-		n, err := srcFile.Read(buffer)
-
-		if n > 0 {
-			digest := sha256.Sum256(buffer[:n])
-
-			written, err := dstFile.Write(digest[:])
-			if err != nil {
-				return err
-			}
-
-			if written != len(digest) {
-				return io.ErrShortWrite
-			}
-		}
-
-		if err == io.EOF {
-			break
-		}
-
-		if err != nil {
-			return err
-		}
-	}
-
-	success = true
 	return nil
 }
 
