@@ -82,10 +82,34 @@ func (fm *FileManager) Initialize() error {
 	return nil
 }
 
-// func (fm *FileManager) Search(query string) []*FileInfo
+func (fm *FileManager) SearchFile(event FileEvent)[]FileInfo {
+	name := event.Metadata.DisplayName
+	var res []FileInfo
+	if event.FileHash != nil {
+		file := string(event.FileHash)
+		fileInfo, ok := fm.filesByHash[file]
+		if ok {
+			res = append(res, *fileInfo)
+		}
+	}
+	fileInfos, ok := fm.searchIndex[name]
+	if ok {
+		for _, fileInfo := range fileInfos {
+			res = append(res, *fileInfo)
+		}
+	}
+	return res
+}
 
-// func (fm *FileManager) Get(hash []byte) (*FileInfo, bool)
+func (fm *FileManager) Get(hash []byte) (*FileInfo, bool){
+	fileInfo,ok:= fm.filesByHash[string(hash)]
+	if !ok{
+		return nil,false
+	}
+	return fileInfo,ok
+}
 
+// TODO:
 // func (fm *FileManager) ReadChunk(hash []byte, index uint32) ([]byte, error)
 
 func (fm *FileManager) seedLoop() {
@@ -113,7 +137,8 @@ func (fm *FileManager) fileEventLoop() {
 			fm.removeFormMap(event.FileHash)
 		case GetFilesEvent:
 			event.Response <- fm.getFiles()
-
+		case searchEvent:
+			event.Response<-fm.SearchFile(event)
 		}
 	}
 }
@@ -175,7 +200,6 @@ func (fm *FileManager) removeSearchTerm(term string, file *FileInfo) {
 		}
 	}
 }
-
 
 func (fm *FileManager) removeFormMap(fileHash []byte) {
 	fm.setState(StateUpdating)

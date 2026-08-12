@@ -6,6 +6,7 @@ const (
     AddFileEvent FileEventType = iota
     RemoveFileEvent
     GetFilesEvent
+	searchEvent
 )
 
 const (
