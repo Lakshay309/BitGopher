@@ -224,7 +224,7 @@ func (a *App) SendPacketSync(conn net.Conn, peerID uuid.UUID, packetType transpo
 		case err := <-resp:
 			return err
 
-		case <-time.After(5 * time.Second):
+		case <-time.After(30 * time.Second):
 			return errors.New("write response timed out")
 		}
 	}
@@ -278,3 +278,32 @@ func (a *App) handlePong(cmd transport.ReadCommad) {
 		Originate: "App.handlePong",
 	}
 }
+
+
+
+/* TODO: what do we have to do for file handling part 
+
+* create an api that will can send request to other peer for the search of particular file do it exist with them or not 
+
+*if that particular file Exist we have to have send info about the file metadata
+
+* if not exist we still have to response negative to the peer 
+
+* we also have to maintain a filetracker that will see who have which file with them and store relivant info about the file in that peer(reciever peer)
+
+* then we will have a option to to get a file using the name that is asociated with it we will take hash from the filetracker and then send that hash to the peer that have that particular file like we wnat that file
+
+* we also have to build relevant protocol for the file transfer how the file trnafer protocol should look 
+
+* we also ahve to create some mechanism that will  recieve the file from the peer 
+
+
+* * what we have currently in filemanager
+
+* we have a way to get the file information for a particular hash ( we can get the metadata about the file which can be used to steam the file)
+* we have a functionality to search the file using name and stuff in filemanager
+* remove a particular file using the fileshash
+* get all the file we are seeding locally
+* we also have a complete funcitonlity to seed a file using the file path and some metadata fields 
+
+*/
