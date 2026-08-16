@@ -5,7 +5,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/Lakshay309/bitgopher/internal/common"
 )
+
 /*
 populateChunkMetadata creates the chunk file for srcPath and populates
 the chunk-related fields of metadata.
@@ -65,7 +68,7 @@ Parameters:
 On failure, the partially created chunk file is removed.
 */
 func (fm *FileManager) createChunkFile(srcPath string, dstPath string) error {
-	buffer := make([]byte, ChunkSize)
+	buffer := make([]byte, common.ChunkSize)
 	success := false
 
 	srcFile, err := os.Open(srcPath)

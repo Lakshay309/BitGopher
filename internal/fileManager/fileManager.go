@@ -82,7 +82,7 @@ func (fm *FileManager) Initialize() error {
 	return nil
 }
 
-func (fm *FileManager) SearchFile(event FileEvent)[]FileInfo {
+func (fm *FileManager) SearchFile(event FileEvent) []FileInfo {
 	name := event.Metadata.DisplayName
 	var res []FileInfo
 	if event.FileHash != nil {
@@ -101,12 +101,12 @@ func (fm *FileManager) SearchFile(event FileEvent)[]FileInfo {
 	return res
 }
 
-func (fm *FileManager) Get(hash []byte) (*FileInfo, bool){
-	fileInfo,ok:= fm.filesByHash[string(hash)]
-	if !ok{
-		return nil,false
+func (fm *FileManager) Get(hash []byte) (*FileInfo, bool) {
+	fileInfo, ok := fm.filesByHash[string(hash)]
+	if !ok {
+		return nil, false
 	}
-	return fileInfo,ok
+	return fileInfo, ok
 }
 
 // TODO:
@@ -133,12 +133,18 @@ func (fm *FileManager) fileEventLoop() {
 		switch event.Type {
 		case AddFileEvent:
 			fm.addToMap(event.Metadata)
+			
 		case RemoveFileEvent:
 			fm.removeFormMap(event.FileHash)
+
 		case GetFilesEvent:
-			event.Response <- fm.getFiles()
+			fm.getFiles(event.Response)
+
+		case GetFileEvent:
+			fm.getFile(event.Response, event.FileHash)
+
 		case searchEvent:
-			event.Response<-fm.SearchFile(event)
+			event.Response <- fm.SearchFile(event)
 		}
 	}
 }
@@ -227,8 +233,26 @@ func (fm *FileManager) removeFormMap(fileHash []byte) {
 	}
 }
 
-func (fm *FileManager) getFiles() []FileInfo {
+func (fm *FileManager) getFile(resp chan []FileInfo, fileHash []byte) {
+	if resp == nil || fileHash == nil {
+		return
+	}
+
+	fileEntry, ok := fm.filesByHash[string(fileHash)]
+	if !ok {
+		resp <- []FileInfo{}
+		return
+	}
+
+	resp <- []FileInfo{*fileEntry}
+}
+
+func (fm *FileManager) getFiles(resp chan []FileInfo) {
 	buffer := make([]FileInfo, 0, len(fm.filesByHash))
+
+	if resp == nil {
+		return
+	}
 
 	for _, entry := range fm.filesByHash {
 		file := FileInfo{
@@ -248,7 +272,7 @@ func (fm *FileManager) getFiles() []FileInfo {
 		buffer = append(buffer, file)
 	}
 
-	return buffer
+	resp <- buffer
 }
 
 func (fm *FileManager) setState(state StateType) {

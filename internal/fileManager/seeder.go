@@ -19,7 +19,7 @@ const (
 	RemoveSeed
 	RemoteSeed
 	ReSeed
-	ChunkSize = 1 << 20
+	
 )
 
 type SeedRequest struct {
