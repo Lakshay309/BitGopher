@@ -116,3 +116,8 @@ func (fm *FileManager) createChunkFile(srcPath string, dstPath string) error {
 	success = true
 	return nil
 }
+
+
+func (fm *FileManager) ReadChunkHashFile(){
+	
+}

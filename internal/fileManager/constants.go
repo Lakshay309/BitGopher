@@ -3,9 +3,9 @@ package filemanager
 type FileEventType byte
 
 const (
-    AddFileEvent FileEventType = iota
-    RemoveFileEvent
-    GetFilesEvent
+	AddFileEvent FileEventType = iota
+	RemoveFileEvent
+	GetFilesEvent
 	GetFileEvent
 	searchEvent
 )

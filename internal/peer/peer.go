@@ -169,6 +169,7 @@ func (pm *PeerManager) handleRemovePeerEvent(event PeerEvent) {
 		_ = peer.Conn.Close()
 	}
 
+	// TODO: blacklist peers
 	delete(pm.Peers, peer.ID)
 }
 

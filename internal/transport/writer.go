@@ -18,6 +18,7 @@ type WriteCommand struct {
 
 func (t *TCPTransport) writeLoop() {
 	for cmd := range t.WriteChan {
+		// TODO: create a write chan for each connection
 		slog.Info("[writeLoop]", "packet", cmd.Packet.Type)
 		err := writePacket(cmd.Conn, cmd.Packet)
 		if err != nil && cmd.Packet.Type != HandshakePacket {

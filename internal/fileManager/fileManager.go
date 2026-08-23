@@ -82,7 +82,12 @@ func (fm *FileManager) Initialize() error {
 	return nil
 }
 
-func (fm *FileManager) SearchFile(event FileEvent) []FileInfo {
+// TODo:
+func (fm *FileManager) SearchFile(event FileEvent) {
+	// search for a single file not multiple in case of a filehash
+	if event.Response == nil {
+		return
+	}
 	name := event.Metadata.DisplayName
 	var res []FileInfo
 	if event.FileHash != nil {
@@ -91,6 +96,8 @@ func (fm *FileManager) SearchFile(event FileEvent) []FileInfo {
 		if ok {
 			res = append(res, *fileInfo)
 		}
+		event.Response <- res
+		return
 	}
 	fileInfos, ok := fm.searchIndex[name]
 	if ok {
@@ -98,7 +105,7 @@ func (fm *FileManager) SearchFile(event FileEvent) []FileInfo {
 			res = append(res, *fileInfo)
 		}
 	}
-	return res
+	event.Response <- res
 }
 
 func (fm *FileManager) Get(hash []byte) (*FileInfo, bool) {
@@ -133,7 +140,7 @@ func (fm *FileManager) fileEventLoop() {
 		switch event.Type {
 		case AddFileEvent:
 			fm.addToMap(event.Metadata)
-			
+
 		case RemoveFileEvent:
 			fm.removeFormMap(event.FileHash)
 
@@ -144,7 +151,7 @@ func (fm *FileManager) fileEventLoop() {
 			fm.getFile(event.Response, event.FileHash)
 
 		case searchEvent:
-			event.Response <- fm.SearchFile(event)
+			fm.SearchFile(event)
 		}
 	}
 }
