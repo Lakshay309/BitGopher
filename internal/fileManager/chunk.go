@@ -1,4 +1,4 @@
-package filemanager
+package fileManager
 
 import (
 	"crypto/sha256"

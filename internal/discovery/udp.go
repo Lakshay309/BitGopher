@@ -39,6 +39,7 @@ type UdpServer struct {
 	gcm cipher.AEAD
 }
 
+
 func NewUdpServer(pm *peer.PeerManager, password string) (*UdpServer, error) {
 
 	key := DeriveKey(password)
@@ -55,8 +56,8 @@ func NewUdpServer(pm *peer.PeerManager, password string) (*UdpServer, error) {
 
 	return &UdpServer{
 		peerManager: pm,
-		exit: make(chan struct{}),
-		gcm:  gcm,
+		exit:        make(chan struct{}),
+		gcm:         gcm,
 	}, nil
 }
 
@@ -140,6 +141,7 @@ func (u *UdpServer) Broadcast() error {
 		}
 	}
 }
+
 
 func (u *UdpServer) sendPacket(tcpAddr string, message PacketType, conn *net.UDPConn) error {
 

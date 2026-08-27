@@ -11,6 +11,11 @@ import (
 	"github.com/google/uuid"
 )
 
+
+/*
+* or we can change what does the blacklist entirely means it means now if peer is balcklisted it is permenant for that session(currently) like the user dont want to connect to that peer and if we simply disconnect it is just like we want to remove the current connection medium something like that and the discovery layer will discover the peer again just after the the peer was disconnected
+*/
+
 type PeerInfo struct {
 	ID           uuid.UUID
 	TCPAddr      string
@@ -36,9 +41,15 @@ const (
 	GetPeerEvent
 	GetConnectionCountEvent
 	SetLastActivity
+
+	HandleBlackListPeer
+	CheckBlackListPeer
+	GetBlackListPeer
+
 )
 const (
 	PeerEventChanSize = 128
+	BlackListPeerTimeoutTime = 5
 )
 
 type PeerCommand struct {
@@ -68,6 +79,9 @@ type PeerManager struct {
 	Self  PeerInfo
 	Peers map[uuid.UUID]*PeerInfo
 
+	// TODO: update this in the constructor
+	BlackListPeers map[uuid.UUID]struct{}
+
 	PeerEventChan chan PeerEvent
 }
 
@@ -83,6 +97,7 @@ func NewPeerManager(mode common.DiscoveryMode) *PeerManager {
 		Self:          selfInfo,
 		Peers:         make(map[uuid.UUID]*PeerInfo),
 		PeerEventChan: make(chan PeerEvent, PeerEventChanSize),
+		BlackListPeers: make(map[uuid.UUID]struct{}),
 	}
 }
 
@@ -133,14 +148,64 @@ func (pm *PeerManager) handlePeerEvent(event PeerEvent) {
 
 	case SetLastActivity:
 		pm.handleSetLastActivity(event)
+	
+	case HandleBlackListPeer:
+		pm.handleBlackListPeer(event)
+	
+	case CheckBlackListPeer:
+		pm.handleCheckBlackListPeer(event)
+	case GetBlackListPeer:
+		pm.handleGetBlackListPeer(event)
+	}
+}
+
+// TODO: complete this 
+func (pm *PeerManager) handleGetBlackListPeer(event PeerEvent) {
+	blackListPeers := make([]PeerInfo, len(pm.BlackListPeers))
+
+	i := 0
+	for peer := range pm.BlackListPeers {
+		blackListPeers[i] = PeerInfo{ID: peer}
+		i++
+	}
+
+	event.Response <- PeerResponse{
+		Peers: blackListPeers,
 	}
 }
 
 
+func (pm *PeerManager) handleCheckBlackListPeer(event PeerEvent){
+	uid := event.Command.Peer.ID
+	if _,ok:=pm.BlackListPeers[uid];ok{
+		event.Response<-PeerResponse{
+			Count: 1,
+		}
+		return
+	}
+	event.Response<-PeerResponse{
+			Count:0,
+		}
+}
+
+
+func (pm *PeerManager) handleBlackListPeer(event PeerEvent){
+	uid:=event.Command.Peer.ID
+	if _,ok:=pm.BlackListPeers[uid];ok{
+		delete(pm.BlackListPeers,uid)
+		return
+	}
+	delete(pm.Peers,uid)
+	pm.BlackListPeers[uid] =struct{}{}
+}
 
 func (pm *PeerManager) handleDiscoveryEvent(event PeerEvent) {
 
 	peer := event.Command.Peer
+
+	if _,ok:=pm.BlackListPeers[peer.ID];ok{
+		return
+	}
 
 	if existing, ok := pm.Peers[peer.ID]; ok {
 		existing.LastSeen = peer.LastSeen
@@ -170,6 +235,7 @@ func (pm *PeerManager) handleRemovePeerEvent(event PeerEvent) {
 	}
 
 	// TODO: blacklist peers
+	// pm.handleAddPeerInBlackListPeer(event)
 	delete(pm.Peers, peer.ID)
 }
 
@@ -311,3 +377,5 @@ func (pm *PeerManager) SetTCPAddr(addr string) {
 func (pm *PeerManager) SetSelfInfo(tcpAddr string) {
 	pm.Self.TCPAddr = tcpAddr
 }
+
+

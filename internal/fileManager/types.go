@@ -1,4 +1,4 @@
-package filemanager
+package fileManager
 
 type ShareMetadata struct {
 	Version uint8

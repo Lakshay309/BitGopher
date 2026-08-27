@@ -2,13 +2,16 @@ package gui
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Lakshay309/bitgopher/internal/app"
 	"github.com/Lakshay309/bitgopher/internal/common"
+	"github.com/Lakshay309/bitgopher/internal/peer"
 	"github.com/google/uuid"
 )
 
@@ -91,6 +94,16 @@ password:
 	return nil
 }
 
+
+func banner_and_info(){
+	printBanner()
+
+	// Subtitle & Status bar
+	fmt.Printf("  %s%sv1.0.0%s %s│%s P2P Network Node CLI\n", Bold, BrightCyan, Reset, Gray, Reset)
+	fmt.Printf("  %sReady! Type %shelp%s %sto view available commands.%s\n\n", Gray, Yellow, Gray, Gray, Reset)
+}
+
+
 func (g *GUI) run() {
 	go g.logLoop()
 
@@ -146,13 +159,113 @@ func (g *GUI) handleCommand(cmd string) {
 
 	case "clear":
 		fmt.Print("\033[2J\033[3J\033[H")
+		banner_and_info()
 
 	case "exit":
 		os.Exit(0)
+	case "blacklist":
+		g.handleBlacklist(args[0])
+
+	case "get_blacklist":
+		g.handleGetBlacklist()
 
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		fmt.Println("Type 'help' to see available commands.")
+	}
+}
+
+// * FIXME: test this if this is right!!???
+func (g *GUI) handleGetBlacklist() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	resp := make(chan app.UIResponse, 1)
+
+	g.app.UiChan <- app.UICommand{
+		Type:     app.UIGetBlackList,
+		Response: resp,
+	}
+
+	var result app.UIResponse
+	select {
+	case result = <-resp:
+	case <-ctx.Done():
+		slog.Error("Failed to fetch blacklist: command timed out")
+		return
+	}
+
+	// 2. Safely check for errors returned by the app layer
+	if result.Err != nil {
+		slog.Error("Failed to fetch blacklist", "err", result.Err)
+		return
+	}
+
+	peerSlice, ok := result.Payload.([]peer.PeerInfo)
+	if !ok {
+		slog.Error("Conversion failed: expected []peer.PeerInfo", "got", fmt.Sprintf("%T", result.Payload))
+		return
+	}
+
+	// Prepare data rows
+	headers := []string{"INDEX", "PEER ID"}
+	rows := make([][]string, 0, len(peerSlice))
+
+	if len(peerSlice) == 0 {
+		rows = append(rows, []string{"-", "No blacklisted peers"})
+	} else {
+		for i, p := range peerSlice {
+			rows = append(rows, []string{fmt.Sprintf("%d", i+1), fmt.Sprintf("%s", p.ID)})
+		}
+	}
+
+	// Calculate dynamic column widths based on content
+	colWidths := []int{len(headers[0]), len(headers[1])}
+	for _, row := range rows {
+		if len(row[0]) > colWidths[0] {
+			colWidths[0] = len(row[0])
+		}
+		if len(row[1]) > colWidths[1] {
+			colWidths[1] = len(row[1])
+		}
+	}
+
+	// Build border lines
+	var topBorder, midBorder, botBorder string
+	for i, w := range colWidths {
+		line := strings.Repeat("─", w+2)
+		if i == 0 {
+			topBorder += "┌" + line
+			midBorder += "├" + line
+			botBorder += "└" + line
+		} else {
+			topBorder += "┬" + line
+			midBorder += "┼" + line
+			botBorder += "┴" + line
+		}
+	}
+	topBorder += "┐"
+	midBorder += "┤"
+	botBorder += "┘"
+
+	// Render table
+	fmt.Println()
+	fmt.Println(topBorder)
+	fmt.Printf("│ %-*s │ %-*s │\n", colWidths[0], headers[0], colWidths[1], headers[1])
+	fmt.Println(midBorder)
+
+	for _, row := range rows {
+		fmt.Printf("│ %-*s │ %-*s │\n", colWidths[0], row[0], colWidths[1], row[1])
+	}
+
+	fmt.Println(botBorder)
+	fmt.Println()
+}
+
+func (g *GUI) handleBlacklist(uid string){
+	g.app.UiChan<-app.UICommand{
+		Type: app.UIBlackList,
+		RemotePeerID: uuid.MustParse(uid),
 	}
 }
 

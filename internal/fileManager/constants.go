@@ -1,4 +1,4 @@
-package filemanager
+package fileManager
 
 type FileEventType byte
 
@@ -7,7 +7,7 @@ const (
 	RemoveFileEvent
 	GetFilesEvent
 	GetFileEvent
-	searchEvent
+	SearchEvent
 )
 
 const (

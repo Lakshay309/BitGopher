@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Lakshay309/bitgopher/internal/common"
 	"github.com/Lakshay309/bitgopher/internal/discovery"
-	"github.com/Lakshay309/bitgopher/internal/filemanager"
+	"github.com/Lakshay309/bitgopher/internal/fileManager"
 	"github.com/Lakshay309/bitgopher/internal/peer"
 	"github.com/Lakshay309/bitgopher/internal/transport"
 	"github.com/google/uuid"
@@ -31,7 +33,7 @@ type App struct {
 	transport   *transport.TCPTransport
 	peerManager *peer.PeerManager
 	discovery   *discovery.UdpServer
-	fileManager *filemanager.FileManager
+	fileManager *fileManager.FileManager
 	exit        chan struct{}
 	UiLogChan   chan UILog
 	UiChan      chan UICommand
@@ -47,18 +49,34 @@ func NewApp(mode common.DiscoveryMode, password string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// initiating the fileManager
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	sharedDir := filepath.Join(dir, ".share")
+
+	fileManager, err := fileManager.NewFileManager(sharedDir, peerManager.Self.ID)
+	if err != nil {
+		return nil, err
+	}
+
 	return &App{
 		transport:   transport,
 		discovery:   udpserver,
 		peerManager: peerManager,
+		fileManager: fileManager,
 		exit:        make(chan struct{}),
 		UiLogChan:   make(chan UILog, UILogChanSize),
 		UiChan:      make(chan UICommand, UIChanSize),
 	}, nil
 }
 
-
 func (a *App) Start() error {
+	// Start file manager. It starts its own goroutine internally.
+	a.fileManager.Run()
+
 	// start tcp server
 	if err := a.transport.Start(); err != nil {
 		a.UiLogChan <- UILog{
@@ -116,6 +134,34 @@ func (a *App) handleEvent(cmd UICommand) {
 		a.handleUIPeersEvent(cmd.Response)
 	case UIDisconnect:
 		a.handleUIDisconnect(cmd)
+	case UIBlackList:
+		a.handleBlacklist(cmd)
+	case UIGetBlackList:
+		a.handleGetBlacklist(cmd)
+	}
+}
+
+func (a *App) handleGetBlacklist(cmd UICommand) {
+	resp := make(chan peer.PeerResponse)
+	a.peerManager.PeerEventChan <- peer.PeerEvent{
+		Type:     peer.GetBlackListPeer,
+		Response: resp,
+	}
+	result := <-resp
+	peers := result.Peers
+	cmd.Response <- UIResponse{
+		Payload: peers,
+	}
+}
+
+func (a *App) handleBlacklist(cmd UICommand) {
+	a.peerManager.PeerEventChan <- peer.PeerEvent{
+		Type: peer.HandleBlackListPeer,
+		Command: peer.PeerCommand{
+			Peer: peer.PeerInfo{
+				ID: cmd.RemotePeerID,
+			},
+		},
 	}
 }
 
@@ -130,34 +176,89 @@ func (a *App) handlePacket(cmd transport.ReadCommad) {
 	}
 }
 
-// TODO: search functionality 
-func(a *App) SearchForAFile(fileName string){
-	fileName=strings.Trim(fileName," ")
-	if len(fileName)==0{
+// TODO: search functionality
+// we have to test this
+// get file using filename
+func (a *App) SearchForAFile(fileName string) {
+	fileName = strings.Trim(fileName, " ")
+	if len(fileName) == 0 {
 		return
 	}
-	// a.
+	filemanagerState := a.fileManager.State()
+	if filemanagerState != fileManager.StateReady {
+		return
+	}
+	resp := make(chan []fileManager.FileInfo)
+	a.fileManager.FileEventChan <- fileManager.FileEvent{
+		Type: fileManager.SearchEvent,
+		Metadata: fileManager.ShareMetadata{
+			DisplayName: fileName,
+		},
+		Response: resp,
+	}
+	result := <-resp
+	// TODO: this print should be beaty full
+	fmt.Println(result)
 }
 
+// returns the []filemanager.FileInfo
+func (a *App) GetFiles() []fileManager.FileInfo {
+	resp := make(chan []fileManager.FileInfo)
+	a.fileManager.FileEventChan <- fileManager.FileEvent{
+		Type:     fileManager.GetFilesEvent,
+		Response: resp,
+	}
+	result := <-resp
+	return result
+}
 
-/* TODO: what do we have to do for file handling part 
+// getfile using filehash
+func (a *App) GetFileUsingHash(hash []byte) []fileManager.FileInfo {
+	resp := make(chan []fileManager.FileInfo)
+	a.fileManager.FileEventChan <- fileManager.FileEvent{
+		Type:     fileManager.GetFileEvent,
+		FileHash: hash,
+		Response: resp,
+	}
+	result := <-resp
+	return result
+}
+
+func (a *App) SeedLocalFile(path string, description string, keywords []string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	if info.IsDir() {
+		return
+	}
+	a.fileManager.SeedChan <- fileManager.SeedRequest{
+		Type:        fileManager.LocalSeed,
+		Path:        path,
+		Description: description,
+		Keywords:    keywords,
+	}
+	fmt.Println("seeding...")
+}
+
+/* TODO: what do we have to do for file handling part
 
 *TODO : peer after disconnect gets re connect solve that
 
 
-* create an api that will can send request to other peer for the search of particular file do it exist with them or not 
+* create an api that will can send request to other peer for the search of particular file do it exist with them or not
 
 *if that particular file Exist we have to have send info about the file metadata
 
-* if not exist we still have to response negative to the peer 
+* if not exist we still have to response negative to the peer
 
 * we also have to maintain a filetracker that will see who have which file with them and store relivant info about the file in that peer(reciever peer)
 
 * then we will have a option to to get a file using the name that is asociated with it we will take hash from the filetracker and then send that hash to the peer that have that particular file like we wnat that file
 
-* we also have to build relevant protocol for the file transfer how the file trnafer protocol should look 
+* we also have to build relevant protocol for the file transfer how the file trnafer protocol should look
 
-* we also ahve to create some mechanism that will  recieve the file from the peer 
+* we also ahve to create some mechanism that will  recieve the file from the peer
 
 
 * * what we have currently in filemanager
@@ -166,10 +267,9 @@ func(a *App) SearchForAFile(fileName string){
 * we have a functionality to search the file using name and stuff in filemanager
 * remove a particular file using the fileshash
 * get all the file we are seeding locally
-* we also have a complete funcitonlity to seed a file using the file path and some metadata fields 
+* we also have a complete funcitonlity to seed a file using the file path and some metadata fields
 
-*/
-
+ */
 
 //* helper function
 
@@ -322,5 +422,3 @@ func (a *App) handlePong(cmd transport.ReadCommad) {
 		Originate: "App.handlePong",
 	}
 }
-
-

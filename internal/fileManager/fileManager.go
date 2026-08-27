@@ -1,4 +1,4 @@
-package filemanager
+package fileManager
 
 import (
 	"encoding/hex"
@@ -9,6 +9,9 @@ import (
 
 	"github.com/google/uuid"
 )
+
+
+
 
 type StateType string
 
@@ -82,7 +85,35 @@ func (fm *FileManager) Initialize() error {
 	return nil
 }
 
-// TODo:
+// // TODO:
+// func (fm *FileManager) SearchAFile(event FileEvent){
+// 	if event.Response == nil{
+// 		return 
+// 	}
+// 	name := event.Metadata.DisplayName
+// 	var res []FileInfo
+
+// 	if event.FileHash != nil {
+// 		file := string(event.FileHash)
+// 		fileInfo, ok := fm.filesByHash[file]
+// 		if ok {
+// 			res = append(res, *fileInfo)
+// 		}
+// 		event.Response <- res
+// 		return
+// 	}
+
+// 	fileInfos, ok := fm.searchIndex[name]
+// 	if ok {
+// 		for _, fileInfo := range fileInfos {
+// 			res = append(res, *fileInfo)
+// 		}
+// 	}
+// 	event.Response <- res
+
+// }
+
+
 func (fm *FileManager) SearchFile(event FileEvent) {
 	// search for a single file not multiple in case of a filehash
 	if event.Response == nil {
@@ -150,7 +181,7 @@ func (fm *FileManager) fileEventLoop() {
 		case GetFileEvent:
 			fm.getFile(event.Response, event.FileHash)
 
-		case searchEvent:
+		case SearchEvent:
 			fm.SearchFile(event)
 		}
 	}

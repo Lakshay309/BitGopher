@@ -16,6 +16,8 @@ const (
 	UIPeers
 	UIDial
 	UIDisconnect
+	UIBlackList
+	UIGetBlackList
 )
 
 type UIResponse struct {
