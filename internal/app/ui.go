@@ -18,6 +18,12 @@ const (
 	UIDisconnect
 	UIBlackList
 	UIGetBlackList
+
+	// file UI commands
+	UISearchForAFile
+	UIGetSeededFiles
+	UIGetSeededFileUsingHash
+	UISeedLocalFile
 )
 
 type UIResponse struct {
@@ -25,10 +31,19 @@ type UIResponse struct {
 	Err     error
 }
 
+type FilePayload struct {
+	FileName    string
+	Path        string
+	FileHash    []byte
+	Keywords    []string
+	Description string
+}
+
 type UICommand struct {
 	Type         UICommandType
 	RemotePeerID uuid.UUID
 	Payload      string
+	FilePayload  FilePayload
 	Response     chan UIResponse
 }
 

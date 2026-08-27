@@ -152,7 +152,6 @@ func (g *GUI) handleCommand(cmd string) {
 		// args should contain exactly one peer ID
 		g.handlePing(args[0])
 
-
 	case "disconnect":
 		// args should contain exactly one peer ID
 		g.handleDisconnect(args[0])
@@ -163,6 +162,7 @@ func (g *GUI) handleCommand(cmd string) {
 
 	case "exit":
 		os.Exit(0)
+
 	case "blacklist":
 		g.handleBlacklist(args[0])
 
@@ -175,9 +175,9 @@ func (g *GUI) handleCommand(cmd string) {
 	}
 }
 
-// * FIXME: test this if this is right!!???
 func (g *GUI) handleGetBlacklist() {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), common.ContextTimeInMinute*time.Minute)
+
 	defer cancel()
 
 	resp := make(chan app.UIResponse, 1)

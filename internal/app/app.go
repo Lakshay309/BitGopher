@@ -1,13 +1,13 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/Lakshay309/bitgopher/internal/common"
@@ -130,38 +130,29 @@ func (a *App) handleEvent(cmd UICommand) {
 	switch cmd.Type {
 	case UIPing:
 		a.handleUIPingEvent(cmd)
+
 	case UIPeers:
 		a.handleUIPeersEvent(cmd.Response)
+
 	case UIDisconnect:
 		a.handleUIDisconnect(cmd)
+
 	case UIBlackList:
 		a.handleBlacklist(cmd)
+
 	case UIGetBlackList:
 		a.handleGetBlacklist(cmd)
-	}
-}
 
-func (a *App) handleGetBlacklist(cmd UICommand) {
-	resp := make(chan peer.PeerResponse)
-	a.peerManager.PeerEventChan <- peer.PeerEvent{
-		Type:     peer.GetBlackListPeer,
-		Response: resp,
-	}
-	result := <-resp
-	peers := result.Peers
-	cmd.Response <- UIResponse{
-		Payload: peers,
-	}
-}
+	// we have to send response chan in these functions
+	case UISearchForAFile:
+		a.handleSearchForAFile(cmd)
+	case UIGetSeededFiles:
+		a.handleGetSeededFiles(cmd)
+	case UIGetSeededFileUsingHash:
+		a.handleGetSeededFileUsingHash(cmd)
+	case UISeedLocalFile:
+		a.handleSeedLocalFile(cmd)
 
-func (a *App) handleBlacklist(cmd UICommand) {
-	a.peerManager.PeerEventChan <- peer.PeerEvent{
-		Type: peer.HandleBlackListPeer,
-		Command: peer.PeerCommand{
-			Peer: peer.PeerInfo{
-				ID: cmd.RemotePeerID,
-			},
-		},
 	}
 }
 
@@ -176,100 +167,39 @@ func (a *App) handlePacket(cmd transport.ReadCommad) {
 	}
 }
 
-// TODO: search functionality
-// we have to test this
-// get file using filename
-func (a *App) SearchForAFile(fileName string) {
-	fileName = strings.Trim(fileName, " ")
-	if len(fileName) == 0 {
-		return
+func (a *App) handleGetBlacklist(cmd UICommand) {
+	ctx, cancel := context.WithTimeout(context.Background(), common.ContextTimeInMinute*time.Minute)
+	defer cancel()
+
+	resp := make(chan peer.PeerResponse)
+	a.peerManager.PeerEventChan <- peer.PeerEvent{
+		Type:     peer.GetBlackListPeer,
+		Response: resp,
 	}
-	filemanagerState := a.fileManager.State()
-	if filemanagerState != fileManager.StateReady {
-		return
+	select {
+	case <-ctx.Done():
+		slog.Error("[handleGetBlacklist] Time OUT")
+		cmd.Response <- UIResponse{
+			Err: fmt.Errorf("TIme out error"),
+		}
+	case result := <-resp:
+		peers := result.Peers
+		cmd.Response <- UIResponse{
+			Payload: peers,
+		}
 	}
-	resp := make(chan []fileManager.FileInfo)
-	a.fileManager.FileEventChan <- fileManager.FileEvent{
-		Type: fileManager.SearchEvent,
-		Metadata: fileManager.ShareMetadata{
-			DisplayName: fileName,
+}
+
+func (a *App) handleBlacklist(cmd UICommand) {
+	a.peerManager.PeerEventChan <- peer.PeerEvent{
+		Type: peer.HandleBlackListPeer,
+		Command: peer.PeerCommand{
+			Peer: peer.PeerInfo{
+				ID: cmd.RemotePeerID,
+			},
 		},
-		Response: resp,
 	}
-	result := <-resp
-	// TODO: this print should be beaty full
-	fmt.Println(result)
 }
-
-// returns the []filemanager.FileInfo
-func (a *App) GetFiles() []fileManager.FileInfo {
-	resp := make(chan []fileManager.FileInfo)
-	a.fileManager.FileEventChan <- fileManager.FileEvent{
-		Type:     fileManager.GetFilesEvent,
-		Response: resp,
-	}
-	result := <-resp
-	return result
-}
-
-// getfile using filehash
-func (a *App) GetFileUsingHash(hash []byte) []fileManager.FileInfo {
-	resp := make(chan []fileManager.FileInfo)
-	a.fileManager.FileEventChan <- fileManager.FileEvent{
-		Type:     fileManager.GetFileEvent,
-		FileHash: hash,
-		Response: resp,
-	}
-	result := <-resp
-	return result
-}
-
-func (a *App) SeedLocalFile(path string, description string, keywords []string) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return
-	}
-	if info.IsDir() {
-		return
-	}
-	a.fileManager.SeedChan <- fileManager.SeedRequest{
-		Type:        fileManager.LocalSeed,
-		Path:        path,
-		Description: description,
-		Keywords:    keywords,
-	}
-	fmt.Println("seeding...")
-}
-
-/* TODO: what do we have to do for file handling part
-
-*TODO : peer after disconnect gets re connect solve that
-
-
-* create an api that will can send request to other peer for the search of particular file do it exist with them or not
-
-*if that particular file Exist we have to have send info about the file metadata
-
-* if not exist we still have to response negative to the peer
-
-* we also have to maintain a filetracker that will see who have which file with them and store relivant info about the file in that peer(reciever peer)
-
-* then we will have a option to to get a file using the name that is asociated with it we will take hash from the filetracker and then send that hash to the peer that have that particular file like we wnat that file
-
-* we also have to build relevant protocol for the file transfer how the file trnafer protocol should look
-
-* we also ahve to create some mechanism that will  recieve the file from the peer
-
-
-* * what we have currently in filemanager
-
-* we have a way to get the file information for a particular hash ( we can get the metadata about the file which can be used to steam the file)
-* we have a functionality to search the file using name and stuff in filemanager
-* remove a particular file using the fileshash
-* get all the file we are seeding locally
-* we also have a complete funcitonlity to seed a file using the file path and some metadata fields
-
- */
 
 //* helper function
 
