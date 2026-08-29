@@ -15,8 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-
-
 type GUI struct {
 	app *app.App
 }
@@ -94,15 +92,13 @@ password:
 	return nil
 }
 
-
-func banner_and_info(){
+func banner_and_info() {
 	printBanner()
 
 	// Subtitle & Status bar
 	fmt.Printf("  %s%sv1.0.0%s %s│%s P2P Network Node CLI\n", Bold, BrightCyan, Reset, Gray, Reset)
 	fmt.Printf("  %sReady! Type %shelp%s %sto view available commands.%s\n\n", Gray, Yellow, Gray, Gray, Reset)
 }
-
 
 func (g *GUI) run() {
 	go g.logLoop()
@@ -131,7 +127,6 @@ func (g *GUI) run() {
 		g.handleCommand(line)
 	}
 }
-// TODO: when deleting the peer from the will again discovered so we have to create somekind of blacklist to solve that problem as well ok 
 
 func (g *GUI) handleCommand(cmd string) {
 	fields := strings.Fields(cmd)
@@ -169,12 +164,25 @@ func (g *GUI) handleCommand(cmd string) {
 	case "get_blacklist":
 		g.handleGetBlacklist()
 
+	case "search_file":
+		g.handleSearchFile(args[0])
+	
+	case "localseed_file":
+		g.handleLocalSeedFile(args)
+
+	// TODO: we have to build functionality
+	/*
+		get all files
+		get a spectific file using hash 
+	*/
+
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		fmt.Println("Type 'help' to see available commands.")
 	}
 }
 
+// peer 
 func (g *GUI) handleGetBlacklist() {
 	ctx, cancel := context.WithTimeout(context.Background(), common.ContextTimeInMinute*time.Minute)
 
@@ -262,9 +270,9 @@ func (g *GUI) handleGetBlacklist() {
 	fmt.Println()
 }
 
-func (g *GUI) handleBlacklist(uid string){
-	g.app.UiChan<-app.UICommand{
-		Type: app.UIBlackList,
+func (g *GUI) handleBlacklist(uid string) {
+	g.app.UiChan <- app.UICommand{
+		Type:         app.UIBlackList,
 		RemotePeerID: uuid.MustParse(uid),
 	}
 }
@@ -286,22 +294,21 @@ func (g *GUI) logLoop() {
 	}
 }
 
-func (g *GUI)handlePing(peerIdString string){
-	peerId ,err:=uuid.Parse(peerIdString)
-	if err!=nil{
-		slog.Error("[handlePing]","err",err)
+func (g *GUI) handlePing(peerIdString string) {
+	peerId, err := uuid.Parse(peerIdString)
+	if err != nil {
+		slog.Error("[handlePing]", "err", err)
 	}
-	g.app.UiChan<-app.UICommand{
-		Type: app.UIPing,
+	g.app.UiChan <- app.UICommand{
+		Type:         app.UIPing,
 		RemotePeerID: peerId,
 	}
 }
 
-
-func (g *GUI) handleDisconnect(peerIdString string){
-	peerId ,err:=uuid.Parse(peerIdString)
-	if err!=nil{
-		slog.Error("[handlePing]","err",err)
+func (g *GUI) handleDisconnect(peerIdString string) {
+	peerId, err := uuid.Parse(peerIdString)
+	if err != nil {
+		slog.Error("[handlePing]", "err", err)
 	}
 	g.app.DisconnectPeer(peerId)
 }

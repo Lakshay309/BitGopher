@@ -75,6 +75,9 @@ func NewApp(mode common.DiscoveryMode, password string) (*App, error) {
 
 func (a *App) Start() error {
 	// Start file manager. It starts its own goroutine internally.
+	if err:=a.fileManager.Initialize();err!=nil{
+		return err
+	}
 	a.fileManager.Run()
 
 	// start tcp server
@@ -146,10 +149,13 @@ func (a *App) handleEvent(cmd UICommand) {
 	// we have to send response chan in these functions
 	case UISearchForAFile:
 		a.handleSearchForAFile(cmd)
+
 	case UIGetSeededFiles:
 		a.handleGetSeededFiles(cmd)
+
 	case UIGetSeededFileUsingHash:
 		a.handleGetSeededFileUsingHash(cmd)
+		
 	case UISeedLocalFile:
 		a.handleSeedLocalFile(cmd)
 

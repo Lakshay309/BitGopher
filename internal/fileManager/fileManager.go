@@ -3,15 +3,14 @@ package fileManager
 import (
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"github.com/google/uuid"
 )
-
-
-
 
 type StateType string
 
@@ -85,58 +84,70 @@ func (fm *FileManager) Initialize() error {
 	return nil
 }
 
-// // TODO:
-// func (fm *FileManager) SearchAFile(event FileEvent){
-// 	if event.Response == nil{
-// 		return 
-// 	}
-// 	name := event.Metadata.DisplayName
-// 	var res []FileInfo
-
-// 	if event.FileHash != nil {
-// 		file := string(event.FileHash)
-// 		fileInfo, ok := fm.filesByHash[file]
-// 		if ok {
-// 			res = append(res, *fileInfo)
-// 		}
-// 		event.Response <- res
-// 		return
-// 	}
-
-// 	fileInfos, ok := fm.searchIndex[name]
-// 	if ok {
-// 		for _, fileInfo := range fileInfos {
-// 			res = append(res, *fileInfo)
-// 		}
-// 	}
-// 	event.Response <- res
-
-// }
-
-
 func (fm *FileManager) SearchFile(event FileEvent) {
-	// search for a single file not multiple in case of a filehash
 	if event.Response == nil {
 		return
 	}
-	name := event.Metadata.DisplayName
+
 	var res []FileInfo
-	if event.FileHash != nil {
-		file := string(event.FileHash)
-		fileInfo, ok := fm.filesByHash[file]
-		if ok {
-			res = append(res, *fileInfo)
+	seen := make(map[string]bool)
+
+	if len(event.FileHash) > 0 {
+		hashKey := hex.EncodeToString(event.FileHash)
+		if fileInfo, ok := fm.filesByHash[hashKey]; ok {
+			res = fm.appendUniqueFile(res, seen, fileInfo)
+		} else if fileInfo, ok := fm.filesByHash[string(event.FileHash)]; ok {
+			res = fm.appendUniqueFile(res, seen, fileInfo)
 		}
-		event.Response <- res
+
+		sendSearchResponse(event.Response, res)
 		return
 	}
-	fileInfos, ok := fm.searchIndex[name]
-	if ok {
-		for _, fileInfo := range fileInfos {
-			res = append(res, *fileInfo)
+
+	// 2. Name-Based Search & Tokenization
+	name := strings.TrimSpace(event.Metadata.DisplayName)
+	if name == "" {
+		sendSearchResponse(event.Response, res)
+		return
+	}
+
+	// Build search variations: exact, lowercase, uppercase, and tokenized terms
+	variations := []string{
+		name,
+		strings.ToLower(name),
+		strings.ToUpper(name),
+	}
+	variations = append(variations, tokenize(name)...)
+
+	// Look up variations in the index and deduplicate entries
+	for _, query := range variations {
+		if fileInfos, ok := fm.searchIndex[query]; ok {
+			for _, fileInfo := range fileInfos {
+				res = fm.appendUniqueFile(res, seen, fileInfo)
+			}
 		}
 	}
-	event.Response <- res
+
+	// 3. Return deduplicated results safely
+	sendSearchResponse(event.Response, res)
+}
+
+// Standalone method to append unique files based on path
+func (fm *FileManager) appendUniqueFile(res []FileInfo, seen map[string]bool, info *FileInfo) []FileInfo {
+	if info != nil && !seen[info.Path] {
+		seen[info.Path] = true
+		return append(res, *info)
+	}
+	return res
+}
+
+// Standalone non-blocking helper to send response back to the caller channel
+func sendSearchResponse(ch chan<- []FileInfo, res []FileInfo) {
+	select {
+	case ch <- res:
+	default:
+		slog.Warn("SearchFile response channel full or abandoned")
+	}
 }
 
 func (fm *FileManager) Get(hash []byte) (*FileInfo, bool) {
