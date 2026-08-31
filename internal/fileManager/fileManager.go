@@ -158,7 +158,7 @@ func (fm *FileManager) Get(hash []byte) (*FileInfo, bool) {
 	return fileInfo, ok
 }
 
-// TODO:
+// TODO: do this first after that work on fileTracker !!!!!!
 // func (fm *FileManager) ReadChunk(hash []byte, index uint32) ([]byte, error)
 
 func (fm *FileManager) seedLoop() {
