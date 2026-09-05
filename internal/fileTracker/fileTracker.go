@@ -41,6 +41,7 @@ type FileTrackerResponse struct {
 }
 
 type FileTracker struct {
+	// TODO: this should be an array also, also there should be a system that will remove the peers that are disconnected
 	fileToPeer      map[string]uuid.UUID
 	FileTrackerChan chan FileTrackerEvent
 	quit            chan struct{}

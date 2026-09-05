@@ -38,7 +38,7 @@ func (a *App) handleSearchForAFile(cmd UICommand) {
 	ctx, cancel := context.WithTimeout(context.Background(), common.ContextTimeInMinute*time.Minute)
 	defer cancel()
 
-	resp := make(chan []fileManager.FileInfo, 1)
+	resp := make(chan fileManager.FileEventResponse, 1)
 	select {
 	case <-ctx.Done():
 		cmd.Response <- UIResponse{
@@ -52,6 +52,7 @@ func (a *App) handleSearchForAFile(cmd UICommand) {
 		},
 		Response: resp,
 	}:
+	// TODO: solve this issue we have just changed the resp but we are print same thing as before that also need to be changed
 	}
 	select {
 	case <-ctx.Done():
@@ -61,7 +62,7 @@ func (a *App) handleSearchForAFile(cmd UICommand) {
 		return
 	case result := <-resp:
 		cmd.Response <- UIResponse{
-			Payload: result,
+			Payload: result.FileInfos,
 		}
 	}
 }
@@ -75,7 +76,7 @@ func (a *App) handleGetSeededFiles(cmd UICommand) {
 	ctx, cancel := context.WithTimeout(context.Background(), common.ContextTimeInMinute*time.Minute)
 	defer cancel()
 
-	resp := make(chan []fileManager.FileInfo, 1)
+	resp := make(chan fileManager.FileEventResponse, 1)
 
 	select {
 	case <-ctx.Done():
@@ -91,7 +92,7 @@ func (a *App) handleGetSeededFiles(cmd UICommand) {
 	case <-ctx.Done():
 		sendUIResponse(cmd.Response, UIResponse{Err: ctx.Err()})
 	case result := <-resp:
-		sendUIResponse(cmd.Response, UIResponse{Payload: result})
+		sendUIResponse(cmd.Response, UIResponse{Payload: result.FileInfos})
 	}
 }
 
@@ -113,7 +114,7 @@ func (a *App) handleGetSeededFileUsingHash(cmd UICommand) {
 	ctx, cancel := context.WithTimeout(context.Background(), common.ContextTimeInMinute*time.Minute)
 	defer cancel()
 
-	resp := make(chan []fileManager.FileInfo, 1)
+	resp := make(chan fileManager.FileEventResponse, 1)
 	req := fileManager.FileEvent{
 		Type:     fileManager.GetFileEvent,
 		FileHash: hash,
@@ -131,7 +132,7 @@ func (a *App) handleGetSeededFileUsingHash(cmd UICommand) {
 	case <-ctx.Done():
 		sendUIResponse(cmd.Response, UIResponse{Err: ctx.Err()})
 	case result := <-resp:
-		sendUIResponse(cmd.Response, UIResponse{Payload: result})
+		sendUIResponse(cmd.Response, UIResponse{Payload: result.FileInfos})
 	}
 }
 

@@ -79,7 +79,6 @@ type PeerManager struct {
 	Self  PeerInfo
 	Peers map[uuid.UUID]*PeerInfo
 
-	// TODO: update this in the constructor
 	BlackListPeers map[uuid.UUID]struct{}
 
 	PeerEventChan chan PeerEvent

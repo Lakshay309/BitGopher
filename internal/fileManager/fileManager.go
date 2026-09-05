@@ -3,12 +3,15 @@ package fileManager
 import (
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 
+	"github.com/Lakshay309/bitgopher/internal/common"
 	"github.com/google/uuid"
 )
 
@@ -38,6 +41,11 @@ type FileManager struct {
 	searchIndex map[string][]*FileInfo
 	// is file currently seeded for local?
 	localSeededFiles map[string]struct{}
+
+	// cloasing functionality
+	// TODO: work on this (like we did in filetracker module)
+	quit chan struct{}
+	wg   sync.WaitGroup
 }
 
 func NewFileManager(sharedDir string, peerID uuid.UUID) (*FileManager, error) {
@@ -49,6 +57,7 @@ func NewFileManager(sharedDir string, peerID uuid.UUID) (*FileManager, error) {
 		filesByHash:      make(map[string]*FileInfo),
 		SeedChan:         make(chan SeedRequest, 100),
 		FileEventChan:    make(chan FileEvent, 100),
+		quit:             make(chan struct{}),
 	}
 	fm.state.Store(StateInitializing)
 	return fm, nil
@@ -142,9 +151,12 @@ func (fm *FileManager) appendUniqueFile(res []FileInfo, seen map[string]bool, in
 }
 
 // Standalone non-blocking helper to send response back to the caller channel
-func sendSearchResponse(ch chan<- []FileInfo, res []FileInfo) {
+func sendSearchResponse(ch chan<- FileEventResponse, res []FileInfo) {
 	select {
-	case ch <- res:
+	// TODO:
+	case ch <- FileEventResponse{
+		FileInfos: res,
+	}:
 	default:
 		slog.Warn("SearchFile response channel full or abandoned")
 	}
@@ -158,21 +170,124 @@ func (fm *FileManager) Get(hash []byte) (*FileInfo, bool) {
 	return fileInfo, ok
 }
 
-// TODO: do this first after that work on fileTracker !!!!!!
-// func (fm *FileManager) ReadChunk(hash []byte, index uint32) ([]byte, error)
+// TODO: Test this function when possible
+func (fm *FileManager) ReadChunk(event FileEvent) {
+	// 1. Guard against nil response channels
+	if event.Response == nil {
+		return
+	}
+
+	// 2. Validate basic input requirements
+	if event.FileHash == nil && event.Metadata.Path == "" {
+		event.Response <- FileEventResponse{
+			Err: fmt.Errorf("ERROR: File cannot be reached (missing hash and path)"),
+		}
+		return
+	}
+
+	var path string
+
+	// 3. Resolve path if not explicitly provided
+	if event.Metadata.Path == "" {
+		resp := make(chan FileEventResponse, 1)
+		fm.FileEventChan <- FileEvent{
+			Type:     GetFileEvent,
+			FileHash: event.FileHash,
+			Response: resp,
+		}
+
+		result := <-resp
+		if result.Err != nil {
+			event.Response <- FileEventResponse{Err: result.Err}
+			return
+		}
+
+		fileInfos := result.FileInfos
+		if len(fileInfos) == 0 {
+			event.Response <- FileEventResponse{
+				Err: fmt.Errorf("ERROR: No file metadata found for the provided hash"),
+			}
+			return
+		}
+		path = fileInfos[0].Path
+	} else {
+		path = event.Metadata.Path
+	}
+
+	// 4. Verify file exists and validate bounds
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		event.Response <- FileEventResponse{
+			Err: fmt.Errorf("ERROR: File does not exist or is inaccessible: %w", err),
+		}
+		return
+	}
+
+	offset := event.index * common.ChunkSize
+	if offset < 0 || offset >= fileInfo.Size() {
+		event.Response <- FileEventResponse{
+			Err: fmt.Errorf("ERROR: Chunk index %d out of bounds for file size %d", event.index, fileInfo.Size()),
+		}
+		return
+	}
+
+	// 5. Open file for reading
+	file, err := os.Open(path)
+	if err != nil {
+		event.Response <- FileEventResponse{
+			Err: fmt.Errorf("ERROR: Failed to open file: %w", err),
+		}
+		return
+	}
+	defer file.Close()
+
+	// 6. Seek to the calculated chunk offset
+	_, err = file.Seek(offset, io.SeekStart)
+	if err != nil {
+		event.Response <- FileEventResponse{
+			Err: fmt.Errorf("ERROR: Failed to seek to offset %d: %w", offset, err),
+		}
+		return
+	}
+
+	// 7. Calculate buffer size (accounts for the last partial chunk)
+	remainingBytes := fileInfo.Size() - offset
+	readSize := min(remainingBytes, int64(common.ChunkSize))
+
+	buffer := make([]byte, readSize)
+
+	// 8. Read the chunk from disk
+	n, err := io.ReadFull(file, buffer)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		event.Response <- FileEventResponse{
+			Err: fmt.Errorf("ERROR: Failed to read chunk: %w", err),
+		}
+		return
+	}
+
+	// 9. Send response back to caller
+	event.Response <- FileEventResponse{
+		DataBytes: buffer[:n],
+		Err:       nil,
+	}
+}
 
 func (fm *FileManager) seedLoop() {
 	for req := range fm.SeedChan {
 		switch req.Type {
 		case LocalSeed:
 			go fm.localSeed(req)
+
 		case RemoveSeed:
 			fm.removeSeed(req.FileInfo)
+
 		case RemoteSeed:
 			fm.remoteSeed(req)
+
 		case ReSeed:
 			fm.removeSeed(req.FileInfo)
 			go fm.localSeed(req)
+			
 		}
 	}
 }
@@ -187,10 +302,10 @@ func (fm *FileManager) fileEventLoop() {
 			fm.removeFormMap(event.FileHash)
 
 		case GetFilesEvent:
-			fm.getFiles(event.Response)
+			fm.getFiles(event)
 
 		case GetFileEvent:
-			fm.getFile(event.Response, event.FileHash)
+			fm.getFile(event)
 
 		case SearchEvent:
 			fm.SearchFile(event)
@@ -282,21 +397,34 @@ func (fm *FileManager) removeFormMap(fileHash []byte) {
 	}
 }
 
-func (fm *FileManager) getFile(resp chan []FileInfo, fileHash []byte) {
-	if resp == nil || fileHash == nil {
+func (fm *FileManager) getFile(event FileEvent) {
+
+	if event.Response == nil || event.FileHash == nil {
 		return
 	}
+
+	fileHash := event.FileHash
+	resp := event.Response
 
 	fileEntry, ok := fm.filesByHash[string(fileHash)]
 	if !ok {
-		resp <- []FileInfo{}
+		resp <- FileEventResponse{
+			Err: fmt.Errorf("Error: No file with this hash"),
+		}
 		return
 	}
 
-	resp <- []FileInfo{*fileEntry}
+	resp <- FileEventResponse{
+		FileInfos: []FileInfo{*fileEntry},
+	}
 }
 
-func (fm *FileManager) getFiles(resp chan []FileInfo) {
+func (fm *FileManager) getFiles(event FileEvent) {
+	if event.Response == nil {
+		return
+	}
+	resp := event.Response
+
 	buffer := make([]FileInfo, 0, len(fm.filesByHash))
 
 	if resp == nil {
@@ -321,7 +449,9 @@ func (fm *FileManager) getFiles(resp chan []FileInfo) {
 		buffer = append(buffer, file)
 	}
 
-	resp <- buffer
+	resp <- FileEventResponse{
+		FileInfos: buffer,
+	}
 }
 
 func (fm *FileManager) setState(state StateType) {
