@@ -50,12 +50,19 @@ type FileInfo struct {
 }
 
 type FileEvent struct {
-	Type     FileEventType
-	Metadata ShareMetadata
-	index    int64
-	FileHash []byte
-	Response chan FileEventResponse
+	Type         FileEventType
+	Metadata     ShareMetadata
+	index        int64
+	FileHash     []byte
+	FileProtocol FileProtocolType
+	Response     chan FileEventResponse
 }
+
+type FileProtocolType byte
+
+const(
+	FileTransfer = 0
+)
 
 type FileEventResponse struct {
 	FileInfos []FileInfo

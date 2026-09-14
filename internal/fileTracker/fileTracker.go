@@ -6,19 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Lakshay309/bitgopher/internal/peer"
 	"github.com/google/uuid"
 )
 
-/*
-what we want to do:
-  - when current user generate a request for a file we should be able to store the state of the request
-  - what should we have for one request - first thing we should have the peer who have the file ( there can be multiple of peer that have that particluar file ) we will store a list of object that contain
-  - peerid (peer that has a particular file),
-    that about i think we should first store in file tracker
-    other thing we can store are keywords
-  - this should also have states it should save thing like how the file will be downloaded
-  - also have functionality like resume and stop download how much we have downlaoded a file download a particlular chunk of a file
-*/
 type FileTrackerType int
 
 const FileTrackerChanSize = 32
@@ -40,19 +31,35 @@ type FileTrackerResponse struct {
 	Err     error
 }
 
+/*
+* I think we have to also do create a file meta data file and also start creating the file using the file  liek building protocol here
+
+*/
+
 type FileTracker struct {
-	// TODO: this should be an array also, also there should be a system that will remove the peers that are disconnected
-	fileToPeer      map[string]uuid.UUID
-	FileTrackerChan chan FileTrackerEvent
-	quit            chan struct{}
-	wg              sync.WaitGroup
+	// Map file name to a slice of peer UUIDs that host the file
+	fileToPeer map[string][]uuid.UUID
+
+	// Reverse lookup: map peer UUID to a set of files hosted by that peer (for O(1) removal)
+	peerToFiles map[uuid.UUID]map[string]struct{}
+
+	FileTrackerChan     chan FileTrackerEvent
+	FilePeerManagerChan chan peer.PeerEvent
+
+	quit chan struct{}
+	wg   sync.WaitGroup
 }
 
-func NewFileTracker() *FileTracker {
+// func (fm *FileTracker)
+
+
+func NewFileTracker(peerManagerChan chan peer.PeerEvent) *FileTracker {
 	return &FileTracker{
-		fileToPeer:      map[string]uuid.UUID{},
-		FileTrackerChan: make(chan FileTrackerEvent, FileTrackerChanSize),
-		quit:            make(chan struct{}),
+		fileToPeer:          make(map[string][]uuid.UUID),
+		peerToFiles:         make(map[uuid.UUID]map[string]struct{}),
+		FileTrackerChan:     make(chan FileTrackerEvent, FileTrackerChanSize),
+		FilePeerManagerChan: peerManagerChan,
+		quit:                make(chan struct{}),
 	}
 }
 
@@ -66,9 +73,22 @@ func (f *FileTracker) Stop() {
 	f.wg.Wait()
 }
 
-// AddFile registers a peer mapping (Helper method)
+// AddFile registers a peer mapping for a given file (Helper method)
 func (f *FileTracker) AddFile(fileName string, peerID uuid.UUID) {
-	f.fileToPeer[fileName] = peerID
+	// Add to fileToPeer
+	peers := f.fileToPeer[fileName]
+	for _, id := range peers {
+		if id == peerID {
+			return // Peer already registered for this file
+		}
+	}
+	f.fileToPeer[fileName] = append(peers, peerID)
+
+	// Add to peerToFiles index
+	if _, exists := f.peerToFiles[peerID]; !exists {
+		f.peerToFiles[peerID] = make(map[string]struct{})
+	}
+	f.peerToFiles[peerID][fileName] = struct{}{}
 }
 
 func (f *FileTracker) Run() {
@@ -77,6 +97,7 @@ func (f *FileTracker) Run() {
 		select {
 		case <-f.quit:
 			return
+
 		case event, ok := <-f.FileTrackerChan:
 			if !ok {
 				return
@@ -85,10 +106,20 @@ func (f *FileTracker) Run() {
 			case GetPeerWithFile:
 				f.GetPeerWithFile(event)
 			}
+
+		case event, ok := <-f.FilePeerManagerChan:
+			if !ok {
+				return
+			}
+			switch event.Type {
+			case peer.RemovePeerEvent:
+				f.RemovePeerFromFileToPeer(event)
+			}
 		}
 	}
 }
 
+// GetPeerWithFile responds with a slice of uuid.UUID containing all peers hosting the file
 func (f *FileTracker) GetPeerWithFile(event FileTrackerEvent) {
 	if event.Response == nil {
 		return
@@ -102,27 +133,96 @@ func (f *FileTracker) GetPeerWithFile(event FileTrackerEvent) {
 	ctx, cancel := context.WithTimeout(baseCtx, ContextTimeout)
 	defer cancel()
 
-	peerID, ok := f.fileToPeer[event.FileName]
+	peers, ok := f.fileToPeer[event.FileName]
 	var resp FileTrackerResponse
-	if !ok {
+
+	if !ok || len(peers) == 0 {
 		resp = FileTrackerResponse{
 			Err: fmt.Errorf("file peer not found for key: %s", event.FileName),
 		}
 	} else {
+		// Make a copy to avoid race conditions if caller mutates slice
+		peersCopy := make([]uuid.UUID, len(peers))
+		copy(peersCopy, peers)
 		resp = FileTrackerResponse{
-			Payload: peerID,
+			Payload: peersCopy,
 		}
 	}
 
 	select {
 	case <-ctx.Done():
-		event.Response <- FileTrackerResponse{
-			Err: ctx.Err(),
+		// Avoid blocking if consumer context timed out
+		select {
+		case event.Response <- FileTrackerResponse{Err: ctx.Err()}:
+		default:
 		}
-		return
 	case event.Response <- resp:
-		event.Response <- FileTrackerResponse{
-			Payload: peerID,
-		}
 	}
 }
+
+// RemovePeerFromFileToPeer removes all entries associated with a disconnected peer
+func (f *FileTracker) RemovePeerFromFileToPeer(event peer.PeerEvent) {
+	peerID := event.Command.Peer.ID
+
+	files, exists := f.peerToFiles[peerID]
+	if !exists {
+		return
+	}
+
+	// Remove peer from fileToPeer mapping for each file it owned
+	for fileName := range files {
+		peers := f.fileToPeer[fileName]
+		updatedPeers := make([]uuid.UUID, 0, len(peers))
+
+		for _, id := range peers {
+			if id != peerID {
+				updatedPeers = append(updatedPeers, id)
+			}
+		}
+
+		if len(updatedPeers) == 0 {
+			delete(f.fileToPeer, fileName)
+		} else {
+			f.fileToPeer[fileName] = updatedPeers
+		}
+	}
+
+	// Remove peer entry entirely from secondary index
+	delete(f.peerToFiles, peerID)
+}
+
+
+
+/*
+
+0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Magic (0x4654)| Request Type  |   Reserved    |               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+               +
+|                       Packet Size (uint64)                    |
+|                               +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                               |                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               +
+|                     Transfer UUID (16 bytes)                  |
+|                                                               |
+|                               +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                               |                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               +
+|                                                               |
++                     File Hash (32 bytes SHA-256)               +
+|                                                               |
+|                                                               |
+|                               +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                               |                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               +
+|                       Chunk Index (uint64)                    |
+|                               +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                               |     Chunk Size (uint32)       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                    Chunk Checksum (CRC32 uint32)              |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                         Payload Bytes                         |
+|                              ...                              |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+*/

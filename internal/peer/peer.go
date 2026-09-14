@@ -81,10 +81,13 @@ type PeerManager struct {
 
 	BlackListPeers map[uuid.UUID]struct{}
 
+	// TODO: WORKING file tracker chan
+	FileTrackerChan chan PeerEvent
+
 	PeerEventChan chan PeerEvent
 }
 
-func NewPeerManager(mode common.DiscoveryMode) *PeerManager {
+func NewPeerManager(mode common.DiscoveryMode,FileTracker chan PeerEvent) *PeerManager {
 	id := uuid.New()
 
 	selfInfo := PeerInfo{
@@ -97,6 +100,7 @@ func NewPeerManager(mode common.DiscoveryMode) *PeerManager {
 		Peers:         make(map[uuid.UUID]*PeerInfo),
 		PeerEventChan: make(chan PeerEvent, PeerEventChanSize),
 		BlackListPeers: make(map[uuid.UUID]struct{}),
+		FileTrackerChan: FileTracker,
 	}
 }
 
@@ -153,6 +157,7 @@ func (pm *PeerManager) handlePeerEvent(event PeerEvent) {
 	
 	case CheckBlackListPeer:
 		pm.handleCheckBlackListPeer(event)
+
 	case GetBlackListPeer:
 		pm.handleGetBlackListPeer(event)
 	}
@@ -234,7 +239,17 @@ func (pm *PeerManager) handleRemovePeerEvent(event PeerEvent) {
 	}
 
 	// TODO: blacklist peers
+	// TODO: here we have to add a system to communicate with the filetracker
 	// pm.handleAddPeerInBlackListPeer(event)
+	// TODO: test this will connect to the filetracker
+	pm.FileTrackerChan<-PeerEvent{
+		Type: RemovePeerEvent,
+		Command: PeerCommand{
+			Peer:PeerInfo{
+				ID:event.Command.Peer.ID,
+			},
+		},
+	}
 	delete(pm.Peers, peer.ID)
 }
 

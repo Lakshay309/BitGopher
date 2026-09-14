@@ -1,8 +1,11 @@
 package fileManager
 
 import (
+	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"log/slog"
 	"os"
@@ -170,108 +173,6 @@ func (fm *FileManager) Get(hash []byte) (*FileInfo, bool) {
 	return fileInfo, ok
 }
 
-// TODO: Test this function when possible
-func (fm *FileManager) ReadChunk(event FileEvent) {
-	// 1. Guard against nil response channels
-	if event.Response == nil {
-		return
-	}
-
-	// 2. Validate basic input requirements
-	if event.FileHash == nil && event.Metadata.Path == "" {
-		event.Response <- FileEventResponse{
-			Err: fmt.Errorf("ERROR: File cannot be reached (missing hash and path)"),
-		}
-		return
-	}
-
-	var path string
-
-	// 3. Resolve path if not explicitly provided
-	if event.Metadata.Path == "" {
-		resp := make(chan FileEventResponse, 1)
-		fm.FileEventChan <- FileEvent{
-			Type:     GetFileEvent,
-			FileHash: event.FileHash,
-			Response: resp,
-		}
-
-		result := <-resp
-		if result.Err != nil {
-			event.Response <- FileEventResponse{Err: result.Err}
-			return
-		}
-
-		fileInfos := result.FileInfos
-		if len(fileInfos) == 0 {
-			event.Response <- FileEventResponse{
-				Err: fmt.Errorf("ERROR: No file metadata found for the provided hash"),
-			}
-			return
-		}
-		path = fileInfos[0].Path
-	} else {
-		path = event.Metadata.Path
-	}
-
-	// 4. Verify file exists and validate bounds
-	fileInfo, err := os.Stat(path)
-	if err != nil {
-		event.Response <- FileEventResponse{
-			Err: fmt.Errorf("ERROR: File does not exist or is inaccessible: %w", err),
-		}
-		return
-	}
-
-	offset := event.index * common.ChunkSize
-	if offset < 0 || offset >= fileInfo.Size() {
-		event.Response <- FileEventResponse{
-			Err: fmt.Errorf("ERROR: Chunk index %d out of bounds for file size %d", event.index, fileInfo.Size()),
-		}
-		return
-	}
-
-	// 5. Open file for reading
-	file, err := os.Open(path)
-	if err != nil {
-		event.Response <- FileEventResponse{
-			Err: fmt.Errorf("ERROR: Failed to open file: %w", err),
-		}
-		return
-	}
-	defer file.Close()
-
-	// 6. Seek to the calculated chunk offset
-	_, err = file.Seek(offset, io.SeekStart)
-	if err != nil {
-		event.Response <- FileEventResponse{
-			Err: fmt.Errorf("ERROR: Failed to seek to offset %d: %w", offset, err),
-		}
-		return
-	}
-
-	// 7. Calculate buffer size (accounts for the last partial chunk)
-	remainingBytes := fileInfo.Size() - offset
-	readSize := min(remainingBytes, int64(common.ChunkSize))
-
-	buffer := make([]byte, readSize)
-
-	// 8. Read the chunk from disk
-	n, err := io.ReadFull(file, buffer)
-	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-		event.Response <- FileEventResponse{
-			Err: fmt.Errorf("ERROR: Failed to read chunk: %w", err),
-		}
-		return
-	}
-
-	// 9. Send response back to caller
-	event.Response <- FileEventResponse{
-		DataBytes: buffer[:n],
-		Err:       nil,
-	}
-}
-
 func (fm *FileManager) seedLoop() {
 	for req := range fm.SeedChan {
 		switch req.Type {
@@ -287,7 +188,7 @@ func (fm *FileManager) seedLoop() {
 		case ReSeed:
 			fm.removeSeed(req.FileInfo)
 			go fm.localSeed(req)
-			
+
 		}
 	}
 }
@@ -460,4 +361,290 @@ func (fm *FileManager) setState(state StateType) {
 
 func (fm *FileManager) State() StateType {
 	return fm.state.Load().(StateType)
+}
+
+// TODO: Test this function when possible
+func (fm *FileManager) ReadChunk(event FileEvent) {
+	// 1. Guard against nil response channels
+	if event.Response == nil {
+		return
+	}
+
+	// 2. Validate basic input requirements
+	if event.FileHash == nil && event.Metadata.Path == "" {
+		event.Response <- FileEventResponse{
+			Err: fmt.Errorf("ERROR: File cannot be reached (missing hash and path)"),
+		}
+		return
+	}
+
+	var path string
+
+	// 3. Resolve path if not explicitly provided
+	if event.Metadata.Path == "" {
+		resp := make(chan FileEventResponse, 1)
+		fm.FileEventChan <- FileEvent{
+			Type:     GetFileEvent,
+			FileHash: event.FileHash,
+			Response: resp,
+		}
+
+		result := <-resp
+		if result.Err != nil {
+			event.Response <- FileEventResponse{Err: result.Err}
+			return
+		}
+
+		fileInfos := result.FileInfos
+		if len(fileInfos) == 0 {
+			event.Response <- FileEventResponse{
+				Err: fmt.Errorf("ERROR: No file metadata found for the provided hash"),
+			}
+			return
+		}
+		path = fileInfos[0].Path
+	} else {
+		path = event.Metadata.Path
+	}
+
+	// 4. Verify file exists and validate bounds
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		event.Response <- FileEventResponse{
+			Err: fmt.Errorf("ERROR: File does not exist or is inaccessible: %w", err),
+		}
+		return
+	}
+
+	offset := event.index * common.ChunkSize
+	if offset < 0 || offset >= fileInfo.Size() {
+		event.Response <- FileEventResponse{
+			Err: fmt.Errorf("ERROR: Chunk index %d out of bounds for file size %d", event.index, fileInfo.Size()),
+		}
+		return
+	}
+
+	// 5. Open file for reading
+	file, err := os.Open(path)
+	if err != nil {
+		event.Response <- FileEventResponse{
+			Err: fmt.Errorf("ERROR: Failed to open file: %w", err),
+		}
+		return
+	}
+	defer file.Close()
+
+	// 6. Seek to the calculated chunk offset
+	_, err = file.Seek(offset, io.SeekStart)
+	if err != nil {
+		event.Response <- FileEventResponse{
+			Err: fmt.Errorf("ERROR: Failed to seek to offset %d: %w", offset, err),
+		}
+		return
+	}
+
+	// 7. Calculate buffer size (accounts for the last partial chunk)
+	remainingBytes := fileInfo.Size() - offset
+	readSize := min(remainingBytes, int64(common.ChunkSize))
+
+	buffer := make([]byte, readSize)
+
+	// 8. Read the chunk from disk
+	n, err := io.ReadFull(file, buffer)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		event.Response <- FileEventResponse{
+			Err: fmt.Errorf("ERROR: Failed to read chunk: %w", err),
+		}
+		return
+	}
+
+	// 9. Send response back to caller
+	event.Response <- FileEventResponse{
+		DataBytes: buffer[:n],
+		Err:       nil,
+	}
+}
+
+func (fm *FileManager) ReadFileChunks(event FileEvent) ([]byte, error) {
+
+	//  Validate basic input requirements
+	if event.FileHash == nil && event.Metadata.Path == "" {
+		return nil, fmt.Errorf("Filehash and path is nil")
+	}
+
+	var path string
+
+	//  Resolve path if not explicitly provided
+	if event.Metadata.Path == "" {
+		resp := make(chan FileEventResponse, 1)
+		fm.FileEventChan <- FileEvent{
+			Type:     GetFileEvent,
+			FileHash: event.FileHash,
+			Response: resp,
+		}
+
+		result := <-resp
+		if result.Err != nil {
+			return nil, result.Err
+		}
+
+		fileInfos := result.FileInfos
+		if len(fileInfos) == 0 {
+			return nil, fmt.Errorf("ERROR: No file metadata found for the provided hash")
+		}
+		path = fileInfos[0].Path
+	} else {
+		path = event.Metadata.Path
+	}
+
+	// Verify file exists and validate bounds
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("ERROR: File does not exist or is inaccessible: %w", err)
+	}
+
+	offset := event.index * common.ChunkSize
+	if offset < 0 || offset >= fileInfo.Size() {
+		return nil, fmt.Errorf("ERROR: Chunk index %d out of bounds for file size %d", event.index, fileInfo.Size())
+	}
+
+	// Open file for reading
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("ERROR: Failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	// Seek to the calculated chunk offset
+	_, err = file.Seek(offset, io.SeekStart)
+	if err != nil {
+		return nil, fmt.Errorf("ERROR: Failed to seek to offset %d: %w", offset, err)
+	}
+
+	// Calculate buffer size (accounts for the last partial chunk)
+	remainingBytes := fileInfo.Size() - offset
+	readSize := min(remainingBytes, int64(common.ChunkSize))
+
+	buffer := make([]byte, readSize)
+
+	// Read the chunk from disk
+	n, err := io.ReadFull(file, buffer)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, fmt.Errorf("ERROR: Failed to read chunk: %w", err)
+	}
+	return buffer[:n], nil
+}
+
+func (fm *FileManager) ReadChunkFile(event FileEvent) ([]byte, error) {
+	chunkIndex := event.index
+
+	// Construct path to the chunk index file (e.g. sharedDir/chunks/filename.chunk)
+	chunkFilePath := filepath.Join(fm.sharedDir, ChunkDir, event.Metadata.DisplayName+ChunkExtensionType)
+
+	// Open the chunk index file for reading
+	file, err := os.Open(chunkFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open chunk file at %s: %w", chunkFilePath, err)
+	}
+	defer file.Close()
+
+	// Each SHA-256 digest is exactly 32 bytes
+	const chunkSize = 32
+	offset := int64(chunkIndex) * chunkSize
+
+	// Seek to the byte position of the requested chunk index
+	_, err = file.Seek(offset, io.SeekStart)
+	if err != nil {
+		return nil, fmt.Errorf("failed to seek to chunk index %d at offset %d: %w", chunkIndex, offset, err)
+	}
+
+	// Read exactly 32 bytes for the ith chunk hash
+	chunkHash := make([]byte, chunkSize)
+	_, err = io.ReadFull(file, chunkHash)
+	if err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, fmt.Errorf("chunk index %d is out of bounds for file %s", chunkIndex, event.Metadata.DisplayName)
+		}
+		return nil, fmt.Errorf("failed to read chunk %d: %w", chunkIndex, err)
+	}
+
+	return chunkHash, nil
+}
+
+const MagicBytes uint16 = 0x4654
+
+func (fm *FileManager) SendFilePacket(event FileEvent) {
+	// 1. Read the actual raw payload chunk from the source file
+	payload, err := fm.ReadFileChunks(event)
+	if err != nil {
+		if event.Response != nil {
+			event.Response <- FileEventResponse{
+				Err: fmt.Errorf("failed to read file chunk: %w", err),
+			}
+		}
+		return
+	}
+
+	// 2. Read the 32-byte chunk hash from the .chunk index file
+	chunkHash, err := fm.ReadChunkFile(event)
+	if err != nil {
+		if event.Response != nil {
+			event.Response <- FileEventResponse{
+				Err: fmt.Errorf("failed to read chunk hash: %w", err),
+			}
+		}
+		return
+	}
+
+	// 3. Calculate payload checksum (CRC32)
+	payloadChecksum := crc32.ChecksumIEEE(payload)
+
+	// 4. Calculate total packet length
+	// Header size: 2(Magic) + 1(Type) + 1(Reserved) + 8(PacketSize) + 16(UUID) + 32(FileHash) + 32(ChunkHash) + 8(Index) + 4(ChunkSize) + 4(CRC32) = 108 bytes
+	headerSize := 108
+	totalPacketSize := uint64(headerSize + len(payload))
+
+	packet := make([]byte, totalPacketSize)
+
+	// 5. Pack fields in Network Byte Order (Big Endian)
+	// [0:2] Magic Bytes (2B)
+	binary.BigEndian.PutUint16(packet[0:2], MagicBytes)
+
+	// [2:3] Request Type (1B)
+	packet[2] = byte(event.FileProtocol)
+
+	// [3:4] Reserved (1B)
+	packet[3] = 0x00
+
+	// [4:12] Total Packet Size (8B)
+	binary.BigEndian.PutUint64(packet[4:12], totalPacketSize)
+
+	// [12:28] Peer Transfer UUID (16B)
+	copy(packet[12:28], fm.PeerID[:])
+
+	// [28:60] Global File Hash (32B)
+	copy(packet[28:60], event.FileHash[:])
+
+	// [60:92] Specific Chunk SHA-256 Hash (32B)
+	copy(packet[60:92], chunkHash[:])
+
+	// [92:100] Chunk Index (8B)
+	binary.BigEndian.PutUint64(packet[92:100], uint64(event.index))
+
+	// [100:104] Chunk Payload Size (4B)
+	binary.BigEndian.PutUint32(packet[100:104], uint32(len(payload)))
+
+	// [104:108] Chunk CRC32 Checksum (4B)
+	binary.BigEndian.PutUint32(packet[104:108], payloadChecksum)
+
+	// [108:] Raw Payload Bytes
+	copy(packet[108:], payload)
+
+	// 6. Send the encoded binary packet back over the response channel
+	if event.Response != nil {
+		event.Response <- FileEventResponse{
+			DataBytes: packet,
+			Err:       nil,
+		}
+	}
 }
